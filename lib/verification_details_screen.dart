@@ -50,7 +50,7 @@ class _VerificationDetailsScreenState
 
   final _rejectionReasons = [
 
-    'Fake Receipt Upload Ki Gayi',
+    'Fake Receipt Uploaded',
 
     'Blurry Screenshot',
 
@@ -150,7 +150,7 @@ class _VerificationDetailsScreenState
 
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
 
-          content: Text('Payment approve! Shop reactivate ho gayi.'),
+          content: Text('Payment approved! Shop has been reactivated.'),
 
           backgroundColor: Colors.green,
 
@@ -292,7 +292,7 @@ class _VerificationDetailsScreenState
 
             content: Text(
 
-              'Receipt reject. Shopkeeper ko 3 min ka time diya gaya.',
+              'Receipt rejected. Shopkeeper has been given 3 minutes.',
 
             ),
 
@@ -378,7 +378,7 @@ class _VerificationDetailsScreenState
 
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
 
-          content: Text('Shop successfully suspend ho gayi.'),
+          content: Text('Shop successfully suspended.'),
 
           backgroundColor: Colors.red,
 
@@ -406,7 +406,7 @@ class _VerificationDetailsScreenState
 
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
 
-        title: const Text('Rejection Reason Select Karein',
+        title: const Text('Select Rejection Reason',
 
             style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
 
@@ -572,7 +572,7 @@ class _VerificationDetailsScreenState
 
               _buildCard(
 
-                title: 'Is Batch Ke Orders',
+                title: 'Orders in This Batch',
 
                 icon: Icons.list_alt_outlined,
 
@@ -598,7 +598,7 @@ class _VerificationDetailsScreenState
 
                         Text(
 
-                          'Yeh $orderCount orders is receipt mein shamil hain:',
+                          'These $orderCount orders are included in this receipt:',
 
                           style: TextStyle(
 
@@ -650,7 +650,7 @@ class _VerificationDetailsScreenState
 
                           Text(
 
-                            '...aur ${orderIds.length - 10} orders',
+                            '...and ${orderIds.length - 10} more orders',
 
                             style: TextStyle(
 
@@ -756,7 +756,7 @@ class _VerificationDetailsScreenState
 
                     child: Text(
 
-                      'Approve karne par $orderCount orders "paid" mark honge aur shop active ho jaayegi. Reject karne par saare orders wapas "unpaid" ho jaayenge.',
+                      'On approval, $orderCount orders will be marked "paid" and the shop will become active. On rejection, all orders will go back to "unpaid".',
 
                       style:
 
@@ -790,7 +790,7 @@ class _VerificationDetailsScreenState
 
                       color: Colors.white),
 
-                  label: const Text('Payment Approve Karein',
+                  label: const Text('Approve Payment',
 
                       style: TextStyle(
 
@@ -830,7 +830,7 @@ class _VerificationDetailsScreenState
 
                           color: Colors.red.shade600, size: 18),
 
-                      label: Text('Reject Karein',
+                      label: Text('Reject',
 
                           style: TextStyle(
 
@@ -868,7 +868,7 @@ class _VerificationDetailsScreenState
 
                           const Icon(Icons.block, color: Colors.red, size: 18),
 
-                      label: const Text('Shop Suspend',
+                      label: const Text('Suspend Shop',
 
                           style: TextStyle(
 

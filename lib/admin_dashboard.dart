@@ -3,10 +3,11 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'role_selection_screen.dart';
 import 'shop_detail_page.dart';
-import 'admin_billing_screen.dart'; // ✅ NEW IMPORT
+import 'admin_billing_screen.dart';
 
 class AdminDashboard extends StatefulWidget {
-  const AdminDashboard({super.key});
+  final bool scrollToShops;
+  const AdminDashboard({super.key, this.scrollToShops = false});
 
   @override
   State<AdminDashboard> createState() => _AdminDashboardState();
@@ -14,9 +15,39 @@ class AdminDashboard extends StatefulWidget {
 
 class _AdminDashboardState extends State<AdminDashboard> {
   final user = FirebaseAuth.instance.currentUser;
-  final Color primaryColor = const Color(0xFFF4511E);
-  final Color appBarTextColor = const Color(0xFFF4511E);
+
+  // ── Brand colors ──────────────────────────────────────────────
+  static const Color _navy = Color(0xFF0B1D35);
+  static const Color _navyLight = Color(0xFF0F2545);
+  static const Color _navyCard = Color(0xFF112240);
+  static const Color _accent = Color(0xFFF4511E);
+  static const Color _accentOrange = Color(0xFFFF9500);
+  static const Color _white = Colors.white;
+
   int selectedIndex = 0;
+  int _bottomNavIndex = 0;
+
+  // ── Scroll + highlight for Total Shops card ───────────────────
+  final ScrollController _scrollController = ScrollController();
+  final GlobalKey _totalShopsKey = GlobalKey();
+  bool _shopsHighlighted = false;
+
+  // ── Auth ───────────────────────────────────────────────────────
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.scrollToShops) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _scrollToShopsCard();
+      });
+    }
+  }
 
   void _logout() async {
     await FirebaseAuth.instance.signOut();
@@ -29,16 +60,30 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
   }
 
-  /// 🔥 FIRESTORE STATUS UPDATE FUNCTION (REAL LOGIC)
+  // ── Scroll to & highlight Total Shops card ────────────────────
+  void _scrollToShopsCard() {
+    final ctx = _totalShopsKey.currentContext;
+    if (ctx != null) {
+      Scrollable.ensureVisible(
+        ctx,
+        duration: const Duration(milliseconds: 500),
+        curve: Curves.easeInOut,
+        alignment: 0.1,
+      );
+    }
+    setState(() => _shopsHighlighted = true);
+    Future.delayed(const Duration(milliseconds: 1200), () {
+      if (mounted) setState(() => _shopsHighlighted = false);
+    });
+  }
+
+
   Future<void> _updateShopStatus(
     String shopId,
     String status, {
     String? reason,
   }) async {
-    await FirebaseFirestore.instance
-        .collection('shops')
-        .doc(shopId)
-        .update({
+    await FirebaseFirestore.instance.collection('shops').doc(shopId).update({
       'status': status,
       'rejection_reason': status == "rejected" ? reason ?? "" : "",
     });
@@ -46,13 +91,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
   Stream<int> _count(String collection, {String? status}) {
     Query ref = FirebaseFirestore.instance.collection(collection);
-    if (status != null) {
-      ref = ref.where('status', isEqualTo: status);
-    }
+    if (status != null) ref = ref.where('status', isEqualTo: status);
     return ref.snapshots().map((s) => s.docs.length);
   }
 
-  // ✅ NEW: Pending billing count stream
   Stream<int> _pendingBillingCount() {
     return FirebaseFirestore.instance
         .collection('billing')
@@ -61,409 +103,1099 @@ class _AdminDashboardState extends State<AdminDashboard> {
         .map((s) => s.docs.length);
   }
 
-  Widget _counterText(int value) {
+  // ── Dynamic trend calculation ─────────────────────────────────
+  // Returns a stream that compares today's count vs yesterday's count
+  // using 'created_at' timestamp field on each document.
+  Stream<Map<String, dynamic>> _trendStream(
+    String collection, {
+    String? status,
+  }) {
+    Query ref = FirebaseFirestore.instance.collection(collection);
+    if (status != null) ref = ref.where('status', isEqualTo: status);
+
+    return ref.snapshots().map((snap) {
+      final now = DateTime.now();
+      final todayStart = DateTime(now.year, now.month, now.day);
+      final yesterdayStart = todayStart.subtract(const Duration(days: 1));
+
+      int todayCount = 0;
+      int yesterdayCount = 0;
+
+      for (final doc in snap.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        final raw = data['created_at'];
+        DateTime? createdAt;
+        if (raw is Timestamp) {
+          createdAt = raw.toDate();
+        } else if (raw is String) {
+          createdAt = DateTime.tryParse(raw);
+        }
+
+        if (createdAt != null) {
+          if (createdAt.isAfter(todayStart)) {
+            todayCount++;
+          } else if (createdAt.isAfter(yesterdayStart) &&
+              createdAt.isBefore(todayStart)) {
+            yesterdayCount++;
+          }
+        }
+      }
+
+      double changePercent = 0;
+      bool isUp = true;
+      if (yesterdayCount > 0) {
+        changePercent =
+            ((todayCount - yesterdayCount) / yesterdayCount) * 100;
+        isUp = changePercent >= 0;
+      } else if (todayCount > 0) {
+        changePercent = 100;
+        isUp = true;
+      }
+
+      return {
+        'total': snap.docs.length,
+        'percent': changePercent.abs(),
+        'isUp': isUp,
+        'todayCount': todayCount,
+        'yesterdayCount': yesterdayCount,
+      };
+    });
+  }
+
+  // ── Animated counter ──────────────────────────────────────────
+  Widget _animatedCount(int value, {Color color = _white}) {
     return TweenAnimationBuilder<int>(
       tween: IntTween(begin: 0, end: value),
-      duration: const Duration(milliseconds: 800),
-      builder: (context, val, _) {
-        return Text(
-          val.toString(),
-          style: const TextStyle(
-            fontSize: 26,
-            fontWeight: FontWeight.bold,
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _dashboardCard(
-      String title, IconData icon, Color iconColor, Stream<int> stream) {
-    return StreamBuilder<int>(
-      stream: stream,
-      builder: (context, snapshot) {
-        final value = snapshot.data ?? 0;
-        return Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: iconColor.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(18),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.05),
-                blurRadius: 8,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(icon, color: iconColor, size: 30),
-              const SizedBox(height: 10),
-              _counterText(value),
-              Text(title, style: const TextStyle(color: Colors.black54)),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _statusTab(String title, int index) {
-    final bool isActive = selectedIndex == index;
-    return GestureDetector(
-      onTap: () {
-        setState(() {
-          selectedIndex = index;
-        });
-      },
-      child: Column(
-        children: [
-          Text(
-            title,
-            style: TextStyle(
-              fontWeight: FontWeight.w600,
-              color: isActive ? primaryColor : Colors.black54,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Container(
-            height: 3,
-            width: 40,
-            decoration: BoxDecoration(
-              color: isActive ? primaryColor : Colors.transparent,
-              borderRadius: BorderRadius.circular(10),
-            ),
-          ),
-        ],
+      duration: const Duration(milliseconds: 900),
+      builder: (context, val, _) => Text(
+        val.toString(),
+        style: TextStyle(
+          fontSize: 28,
+          fontWeight: FontWeight.bold,
+          color: color,
+        ),
       ),
     );
   }
 
+  // ── Stat card with dynamic trend ──────────────────────────────
+  Widget _statCard(
+    String title,
+    IconData icon,
+    Color iconBg,
+    String collection, {
+    String? status,
+  }) {
+    return StreamBuilder<Map<String, dynamic>>(
+      stream: _trendStream(collection, status: status),
+      builder: (context, snap) {
+        final total = snap.data?['total'] as int? ?? 0;
+        final percent = snap.data?['percent'] as double? ?? 0;
+        final isUp = snap.data?['isUp'] as bool? ?? true;
+        final todayCount = snap.data?['todayCount'] as int? ?? 0;
+        final yesterdayCount = snap.data?['yesterdayCount'] as int? ?? 0;
+
+        String trendLabel;
+        Color trendColor;
+
+        if (!snap.hasData) {
+          trendLabel = 'Loading...';
+          trendColor = _white.withOpacity(0.4);
+        } else if (yesterdayCount == 0 && todayCount == 0) {
+          trendLabel = 'No data today';
+          trendColor = _white.withOpacity(0.4);
+        } else if (yesterdayCount == 0 && todayCount > 0) {
+          trendLabel = '+$todayCount new today';
+          trendColor = Colors.greenAccent;
+        } else {
+          trendLabel =
+              '${percent.toStringAsFixed(1)}% vs yesterday';
+          trendColor =
+              isUp ? Colors.greenAccent : Colors.redAccent;
+        }
+
+        return Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: _navyCard,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: iconBg.withOpacity(0.18),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, color: iconBg, size: 22),
+              ),
+              const SizedBox(height: 12),
+              _animatedCount(total),
+              const SizedBox(height: 4),
+              Text(
+                title,
+                style: TextStyle(
+                  color: _white.withOpacity(0.55),
+                  fontSize: 12,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  if (snap.hasData &&
+                      !(yesterdayCount == 0 && todayCount == 0))
+                    Icon(
+                      isUp
+                          ? Icons.arrow_upward
+                          : Icons.arrow_downward,
+                      size: 11,
+                      color: trendColor,
+                    ),
+                  if (snap.hasData &&
+                      !(yesterdayCount == 0 && todayCount == 0))
+                    const SizedBox(width: 3),
+                  Flexible(
+                    child: Text(
+                      trendLabel,
+                      style:
+                          TextStyle(color: trendColor, fontSize: 11),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // ── Billing banner ────────────────────────────────────────────
+  Widget _billingBanner() {
+    return StreamBuilder<int>(
+      stream: _pendingBillingCount(),
+      builder: (context, snap) {
+        final pending = snap.data ?? 0;
+
+        return StreamBuilder<QuerySnapshot>(
+          stream: FirebaseFirestore.instance
+              .collection('billing')
+              .snapshots(),
+          builder: (context, billSnap) {
+            double totalBalance = 0;
+            if (billSnap.hasData) {
+              for (final doc in billSnap.data!.docs) {
+                final d = doc.data() as Map<String, dynamic>;
+                totalBalance +=
+                    (d['amount'] as num? ?? 0).toDouble();
+              }
+            }
+
+            return GestureDetector(
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) => const AdminBillingScreen()),
+              ),
+              child: Container(
+                margin:
+                    const EdgeInsets.symmetric(horizontal: 16),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: _navyCard,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 50,
+                      height: 50,
+                      decoration: BoxDecoration(
+                        color: _accent.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(
+                        Icons.account_balance_wallet,
+                        color: _accent,
+                        size: 26,
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment:
+                            CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Platform Billing',
+                            style: TextStyle(
+                              color: _white.withOpacity(0.6),
+                              fontSize: 12,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          const Text(
+                            'Total Balance',
+                            style: TextStyle(
+                              color: _white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                            ),
+                          ),
+                          Text(
+                            'PKR ${totalBalance.toStringAsFixed(0)}',
+                            style: const TextStyle(
+                              color: _white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 22,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        if (pending > 0)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 3),
+                            margin:
+                                const EdgeInsets.only(bottom: 8),
+                            decoration: BoxDecoration(
+                              color:
+                                  _accentOrange.withOpacity(0.2),
+                              borderRadius:
+                                  BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              '$pending pending',
+                              style: const TextStyle(
+                                color: _accentOrange,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 7),
+                          decoration: BoxDecoration(
+                            color: _accent,
+                            borderRadius:
+                                BorderRadius.circular(20),
+                          ),
+                          child: const Text(
+                            'View Payments ›',
+                            style: TextStyle(
+                              color: _white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // ── Tab bar ───────────────────────────────────────────────────
   String _currentStatus() {
     if (selectedIndex == 0) return "pending";
     if (selectedIndex == 1) return "verified";
     return "rejected";
   }
 
+  Widget _tabBar() {
+    final tabs = ['Pending', 'Verified', 'Rejected'];
+
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('shops')
+          .where('status', isEqualTo: 'pending')
+          .snapshots(),
+      builder: (context, snap) {
+        final pendingCount = snap.data?.docs.length ?? 0;
+
+        return Container(
+          margin:
+              const EdgeInsets.symmetric(horizontal: 16),
+          padding: const EdgeInsets.all(4),
+          decoration: BoxDecoration(
+            color: _navyCard,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            children: List.generate(tabs.length, (i) {
+              final active = selectedIndex == i;
+              return Expanded(
+                child: GestureDetector(
+                  onTap: () =>
+                      setState(() => selectedIndex = i),
+                  child: AnimatedContainer(
+                    duration:
+                        const Duration(milliseconds: 200),
+                    padding: const EdgeInsets.symmetric(
+                        vertical: 9),
+                    decoration: BoxDecoration(
+                      color: active
+                          ? _accent
+                          : Colors.transparent,
+                      borderRadius:
+                          BorderRadius.circular(9),
+                    ),
+                    child: Row(
+                      mainAxisAlignment:
+                          MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          tabs[i],
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: active
+                                ? _white
+                                : _white.withOpacity(0.5),
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                          ),
+                        ),
+                        if (i == 0 &&
+                            pendingCount > 0) ...[
+                          const SizedBox(width: 5),
+                          Container(
+                            padding:
+                                const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                    vertical: 1),
+                            decoration: BoxDecoration(
+                              color: active
+                                  ? _white.withOpacity(0.25)
+                                  : _accent.withOpacity(0.25),
+                              borderRadius:
+                                  BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              '$pendingCount',
+                              style: TextStyle(
+                                color: active
+                                    ? _white
+                                    : _accent,
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }),
+          ),
+        );
+      },
+    );
+  }
+
+  // ── Shop list ─────────────────────────────────────────────────
   Widget _shopList() {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection('shops')
           .where('status', isEqualTo: _currentStatus())
           .snapshots(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
+      builder: (context, snap) {
+        if (!snap.hasData) {
+          return const Padding(
+            padding: EdgeInsets.all(32),
+            child: Center(
+              child:
+                  CircularProgressIndicator(color: _accent),
+            ),
+          );
         }
-        final shops = snapshot.data!.docs;
+
+        final shops = snap.data!.docs;
         if (shops.isEmpty) {
-          return Center(child: Text("No ${_currentStatus()} shops"));
+          return Padding(
+            padding: const EdgeInsets.all(40),
+            child: Center(
+              child: Text(
+                "No ${_currentStatus()} shops",
+                style: TextStyle(
+                    color: _white.withOpacity(0.4)),
+              ),
+            ),
+          );
         }
 
         return ListView.builder(
           itemCount: shops.length,
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
-          itemBuilder: (context, index) {
-            final shop = shops[index];
-            final data = shop.data() as Map<String, dynamic>;
+          padding:
+              const EdgeInsets.symmetric(horizontal: 16),
+          itemBuilder: (context, i) {
+            final shop = shops[i];
+            final data =
+                shop.data() as Map<String, dynamic>;
+            final billingStatus =
+                data['billing_status'] ?? 'active';
+            final status = data['status'] ?? 'pending';
 
-            // ✅ NEW: billing_status badge
-            final billingStatus = data['billing_status'] ?? 'active';
+            Color statusColor;
+            switch (status) {
+              case 'verified':
+                statusColor = Colors.greenAccent;
+                break;
+              case 'rejected':
+                statusColor = Colors.redAccent;
+                break;
+              default:
+                statusColor = _accentOrange;
+            }
 
-            return Card(
-              margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: primaryColor,
-                  child: const Icon(Icons.store, color: Colors.white),
+            return GestureDetector(
+              onTap: () async {
+                final result = await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => ShopDetailPage(
+                      shopId: shop.id,
+                      shopData: data,
+                      onStatusChange: (String st,
+                              {String? reason}) async {
+                        await _updateShopStatus(
+                            shop.id, st,
+                            reason: reason);
+                      },
+                    ),
+                  ),
+                );
+                if (result == true) setState(() {});
+              },
+              child: Container(
+                margin:
+                    const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: _navyCard,
+                  borderRadius:
+                      BorderRadius.circular(14),
                 ),
-                title: Row(
+                child: Row(
                   children: [
+                    Container(
+                      width: 46,
+                      height: 46,
+                      decoration: BoxDecoration(
+                        color: _accent.withOpacity(0.15),
+                        borderRadius:
+                            BorderRadius.circular(12),
+                      ),
+                      child: const Icon(Icons.store,
+                          color: _accent, size: 22),
+                    ),
+                    const SizedBox(width: 12),
                     Expanded(
-                      child: Text(
-                        data['shop_name'] ?? "Unnamed Shop",
-                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      child: Column(
+                        crossAxisAlignment:
+                            CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  data['shop_name'] ??
+                                      'Unnamed Shop',
+                                  style: const TextStyle(
+                                    color: _white,
+                                    fontWeight:
+                                        FontWeight.w600,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              ),
+                              if (billingStatus ==
+                                  'suspended')
+                                Container(
+                                  padding: const EdgeInsets
+                                      .symmetric(
+                                      horizontal: 7,
+                                      vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: Colors.red
+                                        .withOpacity(0.2),
+                                    borderRadius:
+                                        BorderRadius
+                                            .circular(6),
+                                  ),
+                                  child: const Text(
+                                    'SUSPENDED',
+                                    style: TextStyle(
+                                      color:
+                                          Colors.redAccent,
+                                      fontSize: 9,
+                                      fontWeight:
+                                          FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            data['shop_category'] ?? '',
+                            style: TextStyle(
+                              color:
+                                  _white.withOpacity(0.45),
+                              fontSize: 12,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            data['shop_location'] ?? '',
+                            style: TextStyle(
+                              color:
+                                  _white.withOpacity(0.35),
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    // ✅ NEW: Show suspended badge on shop card
-                    if (billingStatus == 'suspended')
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 7, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: Colors.red.shade100,
-                          borderRadius: BorderRadius.circular(10),
+                    const SizedBox(width: 8),
+                    Column(
+                      children: [
+                        Container(
+                          padding:
+                              const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 4),
+                          decoration: BoxDecoration(
+                            color: statusColor
+                                .withOpacity(0.15),
+                            borderRadius:
+                                BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            status.toUpperCase(),
+                            style: TextStyle(
+                              color: statusColor,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                         ),
-                        child: const Text(
-                          'SUSPENDED',
-                          style: TextStyle(
-                              color: Colors.red,
-                              fontSize: 9,
-                              fontWeight: FontWeight.bold),
+                        const SizedBox(height: 8),
+                        Icon(
+                          Icons.chevron_right,
+                          color: _white.withOpacity(0.3),
+                          size: 18,
                         ),
-                      ),
+                      ],
+                    ),
                   ],
                 ),
-                subtitle: Text(data['owner_name'] ?? "Unknown Owner"),
-                onTap: () async {
-                  final result = await Navigator.push(
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // ── Bottom nav (4 items) ──────────────────────────────────────
+  Widget _bottomNav() {
+    final items = [
+      {
+        'icon': Icons.dashboard_rounded,
+        'label': 'Dashboard',
+      },
+      {
+        'icon': Icons.store_rounded,
+        'label': 'Shops',
+      },
+      {
+        'icon': Icons.account_balance_wallet_rounded,
+        'label': 'Billing',
+      },
+      {
+        'icon': Icons.bar_chart_rounded,
+        'label': 'Reports',
+      },
+    ];
+
+    return Container(
+      padding: const EdgeInsets.symmetric(
+          horizontal: 8, vertical: 10),
+      decoration: const BoxDecoration(
+        color: _navyCard,
+        border: Border(
+            top: BorderSide(
+                color: Colors.white10, width: 0.5)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: List.generate(items.length, (i) {
+          final active = _bottomNavIndex == i;
+          return GestureDetector(
+            onTap: () {
+              setState(() => _bottomNavIndex = i);
+              switch (i) {
+                case 0:
+                  // Already on dashboard — no navigation needed
+                  break;
+                case 1:
+                  // Scroll to and highlight the Total Shops card
+                  _scrollToShopsCard();
+                  break;
+                case 2:
+                  Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) => ShopDetailPage(
-                        shopId: shop.id,
-                        shopData: data,
-                        onStatusChange:
-                            (String status, {String? reason}) async {
-                          await _updateShopStatus(
-                            shop.id,
-                            status,
-                            reason: reason,
-                          );
-                        },
-                      ),
+                        builder: (_) =>
+                            const AdminBillingScreen()),
+                  ).then((_) =>
+                      setState(() => _bottomNavIndex = 0));
+                  break;
+                case 3:
+                  // Reports page — to be built later
+                  // Navigator.push(context,
+                  //   MaterialPageRoute(builder: (_) => const ReportsPage()));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: const Text(
+                          'Reports coming soon!'),
+                      backgroundColor: _navyCard,
+                      behavior: SnackBarBehavior.floating,
+                      shape: RoundedRectangleBorder(
+                          borderRadius:
+                              BorderRadius.circular(10)),
                     ),
                   );
-                  if (result == true) {
-                    setState(() {});
-                  }
-                },
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  // ✅ NEW: Billing button widget for dashboard
-  Widget _billingButton() {
-    return StreamBuilder<int>(
-      stream: _pendingBillingCount(),
-      builder: (context, snapshot) {
-        final pendingCount = snapshot.data ?? 0;
-
-        return GestureDetector(
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                  builder: (_) => const AdminBillingScreen()),
-            );
-          },
-          child: Container(
-            margin: const EdgeInsets.symmetric(horizontal: 16),
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: pendingCount > 0
-                  ? Colors.orange.shade50
-                  : Colors.green.shade50,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: pendingCount > 0
-                    ? Colors.orange.shade300
-                    : Colors.green.shade300,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 6,
-                  offset: const Offset(0, 3),
-                )
-              ],
-            ),
-            child: Row(
+                  Future.delayed(
+                      const Duration(milliseconds: 300),
+                      () =>
+                          setState(() => _bottomNavIndex = 0));
+                  break;
+              }
+            },
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: pendingCount > 0
-                        ? Colors.orange.shade100
-                        : Colors.green.shade100,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    Icons.account_balance_wallet,
-                    color: pendingCount > 0
-                        ? Colors.orange.shade700
-                        : Colors.green.shade700,
-                    size: 26,
-                  ),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Platform Billing',
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 15),
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        pendingCount > 0
-                            ? '$pendingCount receipt(s) waiting for verification'
-                            : 'All payments verified',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: pendingCount > 0
-                              ? Colors.orange.shade700
-                              : Colors.green.shade700,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
                 Icon(
-                  Icons.chevron_right,
-                  color: pendingCount > 0
-                      ? Colors.orange.shade700
-                      : Colors.green.shade700,
+                  items[i]['icon'] as IconData,
+                  color: active
+                      ? _accent
+                      : _white.withOpacity(0.4),
+                  size: 22,
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  items[i]['label'] as String,
+                  style: TextStyle(
+                    color: active
+                        ? _accent
+                        : _white.withOpacity(0.4),
+                    fontSize: 10,
+                    fontWeight: active
+                        ? FontWeight.w600
+                        : FontWeight.normal,
+                  ),
                 ),
               ],
             ),
-          ),
-        );
-      },
+          );
+        }),
+      ),
     );
   }
 
+  // ── Build ─────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final hour = now.hour;
+    String greeting = 'Good morning';
+    if (hour >= 12 && hour < 17) greeting = 'Good afternoon';
+    if (hour >= 17) greeting = 'Good evening';
+
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: _navy,
       appBar: AppBar(
-        backgroundColor: Colors.white,
-        iconTheme: IconThemeData(color: appBarTextColor),
-        title: Text(
-          "NearBuy",
-          style: TextStyle(
-            color: appBarTextColor,
-            fontWeight: FontWeight.bold,
+        backgroundColor: _navy,
+        elevation: 0,
+        leading: Builder(
+          builder: (ctx) => IconButton(
+            icon: Icon(Icons.menu,
+                color: _white.withOpacity(0.8)),
+            onPressed: () =>
+                Scaffold.of(ctx).openDrawer(),
           ),
         ),
         actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: Image.asset(
-              "assets/logo9.jpeg",
-              width: 40,
-              height: 40,
-              fit: BoxFit.contain,
-            ),
-          )
+          Stack(
+            alignment: Alignment.topRight,
+            children: [
+              IconButton(
+                icon: Icon(
+                    Icons.notifications_none_rounded,
+                    color: _white.withOpacity(0.8)),
+                onPressed: () {},
+              ),
+              Positioned(
+                right: 10,
+                top: 10,
+                child: Container(
+                  width: 8,
+                  height: 8,
+                  decoration: const BoxDecoration(
+                    color: _accent,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
       drawer: Drawer(
+        backgroundColor: _navyCard,
         child: Column(
           children: [
             UserAccountsDrawerHeader(
-              decoration: BoxDecoration(color: primaryColor),
-              currentAccountPicture: const CircleAvatar(
-                backgroundColor: Colors.white,
-                child: Icon(Icons.person, color: Colors.grey),
+              decoration:
+                  const BoxDecoration(color: _navy),
+              currentAccountPicture: Container(
+                decoration: BoxDecoration(
+                  color: _accent.withOpacity(0.2),
+                  shape: BoxShape.circle,
+                  border:
+                      Border.all(color: _accent, width: 2),
+                ),
+                child: const Icon(Icons.person,
+                    color: _white, size: 28),
               ),
-              accountName: Text(user?.displayName ?? "Admin"),
-              accountEmail: Text(user?.email ?? ""),
+              accountName: Text(
+                user?.displayName ?? "Admin",
+                style: const TextStyle(
+                    color: _white,
+                    fontWeight: FontWeight.bold),
+              ),
+              accountEmail: Text(
+                user?.email ?? "",
+                style: TextStyle(
+                    color: _white.withOpacity(0.6)),
+              ),
             ),
-            // ✅ NEW: Billing shortcut in drawer
             ListTile(
               leading: const Icon(
-                  Icons.account_balance_wallet, color: Colors.orange),
-              title: const Text('Platform Billing'),
+                  Icons.account_balance_wallet,
+                  color: _accentOrange),
+              title: const Text('Platform Billing',
+                  style: TextStyle(color: _white)),
               onTap: () {
                 Navigator.pop(context);
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                      builder: (_) => const AdminBillingScreen()),
+                      builder: (_) =>
+                          const AdminBillingScreen()),
                 );
               },
             ),
-            Expanded(child: ListView(children: [])),
+            const Spacer(),
             ListTile(
-              leading: const Icon(Icons.logout, color: Colors.red),
+              leading: const Icon(Icons.logout,
+                  color: Colors.redAccent),
               title: const Text("Logout",
-                  style: TextStyle(color: Colors.red)),
+                  style:
+                      TextStyle(color: Colors.redAccent)),
               onTap: _logout,
             ),
+            const SizedBox(height: 16),
           ],
         ),
       ),
-      body: SingleChildScrollView(
+      body: SafeArea(
         child: Column(
           children: [
-            // ── Stats Grid ──
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: GridView.count(
-                crossAxisCount: 2,
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                crossAxisSpacing: 12,
-                mainAxisSpacing: 12,
-                children: [
-                  _dashboardCard("Total Users", Icons.people,
-                      Colors.green, _count("users")),
-                  _dashboardCard("Total Shops", Icons.store,
-                      primaryColor, _count("shops")),
-                  _dashboardCard(
-                      "Verified Shops",
-                      Icons.verified,
-                      Colors.blue,
-                      _count("shops", status: "verified")),
-                  _dashboardCard(
-                      "Pending Shops",
-                      Icons.hourglass_top,
-                      Colors.orange,
-                      _count("shops", status: "pending")),
-                ],
-              ),
-            ),
-
-            // ✅ NEW: Billing Button — admin can see pending receipts
-            _billingButton(),
-            const SizedBox(height: 16),
-
-            // ── Shop Verification Tabs ──
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(14),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.08),
-                      blurRadius: 6,
-                      offset: const Offset(0, 4),
-                    )
-                  ],
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+            Expanded(
+              child: SingleChildScrollView(
+                controller: _scrollController,
+                child: Column(
+                  crossAxisAlignment:
+                      CrossAxisAlignment.start,
                   children: [
-                    _statusTab("Pending", 0),
-                    _statusTab("Verified", 1),
-                    _statusTab("Rejected", 2),
+                    // ── Greeting ──────────────────────────
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                          20, 4, 20, 0),
+                      child: Column(
+                        crossAxisAlignment:
+                            CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '$greeting,',
+                            style: TextStyle(
+                              color:
+                                  _white.withOpacity(0.5),
+                              fontSize: 14,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Row(
+                            children: [
+                              // "Near" in white, "Buy" in orange
+                              RichText(
+                                text: const TextSpan(
+                                  children: [
+                                    TextSpan(
+                                      text: 'Near',
+                                      style: TextStyle(
+                                        color: _white,
+                                        fontSize: 24,
+                                        fontWeight:
+                                            FontWeight.bold,
+                                      ),
+                                    ),
+                                    TextSpan(
+                                      text: 'Buy',
+                                      style: TextStyle(
+                                        color:
+                                            _accent,
+                                        fontSize: 24,
+                                        fontWeight:
+                                            FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              const Text('👋',
+                                  style: TextStyle(
+                                      fontSize: 22)),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Container(
+                            padding:
+                                const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 5),
+                            decoration: BoxDecoration(
+                              color: _navyCard,
+                              borderRadius:
+                                  BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              mainAxisSize:
+                                  MainAxisSize.min,
+                              children: [
+                                Icon(
+                                    Icons.calendar_today,
+                                    size: 12,
+                                    color: _white
+                                        .withOpacity(0.5)),
+                                const SizedBox(width: 5),
+                                Text(
+                                  '${now.day} ${_monthName(now.month)} ${now.year}  ▾',
+                                  style: TextStyle(
+                                    color: _white
+                                        .withOpacity(0.65),
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    // ── Overview title ────────────────────
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20),
+                      child: Row(
+                        mainAxisAlignment:
+                            MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'Overview',
+                            style: TextStyle(
+                              color: _white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                          Text(
+                            'View Reports ›',
+                            style: TextStyle(
+                              color: _accent,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    // ── Stat grid ─────────────────────────
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16),
+                      child: Column(
+                        children: [
+                          IntrinsicHeight(
+                            child: Row(
+                              crossAxisAlignment:
+                                  CrossAxisAlignment.stretch,
+                              children: [
+                                Expanded(
+                                  child: _statCard(
+                                    'Total Users',
+                                    Icons.people_alt_rounded,
+                                    Colors.blueAccent,
+                                    'users',
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: AnimatedContainer(
+                                    key: _totalShopsKey,
+                                    duration: const Duration(milliseconds: 400),
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(16),
+                                      border: Border.all(
+                                        color: _shopsHighlighted
+                                            ? _accentOrange
+                                            : Colors.transparent,
+                                        width: 2,
+                                      ),
+                                    ),
+                                    child: _statCard(
+                                      'Total Shops',
+                                      Icons.store_rounded,
+                                      _accent,
+                                      'shops',
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          IntrinsicHeight(
+                            child: Row(
+                              crossAxisAlignment:
+                                  CrossAxisAlignment.stretch,
+                              children: [
+                                Expanded(
+                                  child: _statCard(
+                                    'Verified Shops',
+                                    Icons.verified_rounded,
+                                    Colors.greenAccent,
+                                    'shops',
+                                    status: 'verified',
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: _statCard(
+                                    'Pending Shops',
+                                    Icons
+                                        .hourglass_top_rounded,
+                                    _accentOrange,
+                                    'shops',
+                                    status: 'pending',
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    // ── Billing Banner ────────────────────
+                    _billingBanner(),
+
+                    const SizedBox(height: 20),
+
+                    // ── Shop Verification header ──────────
+                    // "View All ›" removed as requested
+                    const Padding(
+                      padding: EdgeInsets.symmetric(
+                          horizontal: 20),
+                      child: Text(
+                        'Shop Verification',
+                        style: TextStyle(
+                          color: _white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 10),
+
+                    // ── Tab bar ───────────────────────────
+                    _tabBar(),
+
+                    const SizedBox(height: 12),
+
+                    // ── Shop list ─────────────────────────
+                    _shopList(),
+
+                    const SizedBox(height: 20),
                   ],
                 ),
               ),
             ),
-            const SizedBox(height: 10),
-            _shopList(),
-            const SizedBox(height: 20),
+
+            // ── Bottom nav ────────────────────────────────
+            _bottomNav(),
           ],
         ),
       ),
     );
+  }
+
+  String _monthName(int m) {
+    const months = [
+      '',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec'
+    ];
+    return months[m];
   }
 }

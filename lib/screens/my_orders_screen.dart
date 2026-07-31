@@ -41,8 +41,23 @@ class MyOrdersScreen extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text("My Orders"),
-        backgroundColor: const Color.fromARGB(255, 21, 101, 192),
+        // ── Light navy background
+        backgroundColor: const Color(0xFF2D3F6B),
+        // ── White back arrow
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 20),
+          onPressed: () => Navigator.pop(context),
+        ),
+        // ── White "My Orders" title
+        title: const Text(
+          "My Orders",
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w700,
+            fontSize: 18,
+          ),
+        ),
+        foregroundColor: Colors.white,
       ),
       body: StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance
@@ -61,7 +76,7 @@ class MyOrdersScreen extends StatelessWidget {
             if (aTime == null || bTime == null) return 0;
             return bTime.compareTo(aTime);
           });
-          
+
           if (orders.isEmpty) {
             return Center(
               child: Column(

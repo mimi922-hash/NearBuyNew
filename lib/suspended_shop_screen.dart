@@ -50,10 +50,10 @@ class _SuspendedShopScreenState extends State<SuspendedShopScreen> {
         ((widget.shopData['pending_fee'] ?? 0) as num).toInt();
 
     final reasons = [
-      'Required time mein receipt upload nahi ki gayi',
+      'Receipt was not uploaded within the required time',
       'Fake payment receipt detected',
-      'Blurry ya unreadable screenshot submit ki',
-      'Incomplete amount submitted (fee se match nahi kiya)',
+      'Blurry or unreadable screenshot submitted',
+      'Incomplete amount submitted (did not match the fee)',
     ];
 
     return Scaffold(
@@ -103,7 +103,7 @@ class _SuspendedShopScreenState extends State<SuspendedShopScreen> {
                 border: Border.all(color: Colors.red.shade200),
               ),
               child: Text(
-                'Aapki shop temporarily customers se chupi hai kyunke platform fee payment verify nahi hui.',
+                'Your shop is temporarily hidden from customers because the platform fee payment has not been verified.',
                 style: TextStyle(
                     color: Colors.red.shade700, fontSize: 14, height: 1.5),
                 textAlign: TextAlign.center,
@@ -213,8 +213,8 @@ class _SuspendedShopScreenState extends State<SuspendedShopScreen> {
                     : const Icon(Icons.upload_file, color: Colors.white),
                 label: Text(
                   fee > 0
-                      ? 'Rs. $fee Ki Receipt Upload Karein'
-                      : 'Koi Pending Fee Nahi',
+                      ? 'Upload Receipt for Rs. $fee'
+                      : 'No Pending Fee',
                   style: const TextStyle(
                       color: Colors.white,
                       fontSize: 15,

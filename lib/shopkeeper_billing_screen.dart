@@ -663,20 +663,20 @@ class _ShopkeeperBillingScreenState extends State<ShopkeeperBillingScreen> {
     final mins = _remainingTime.inMinutes;
     final secs = _remainingTime.inSeconds % 60;
     final timeStr = expired
-        ? 'Time khatam!'
+        ? 'Time expired!'
         : '${mins.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}';
 
     String message = isRejected
 
         ? (expired
-            ? 'Grace period khatam — shop suspend ho jayegi. Abhi billing screen pe jayen.'
-            : 'Receipt reject ho gayi. Sahi receipt upload karein, warna shop suspend ho jayegi:')
+            ? 'Grace period expired — shop will be suspended. Go to billing screen now.'
+            : 'Receipt was rejected. Upload a valid receipt, otherwise the shop will be suspended:')
 
         : isUnderReview
 
-            ? 'Receipt submit ho gayi hai. Admin verification ka intezaar karein.'
+            ? 'Receipt has been submitted. Please wait for admin verification.'
 
-            : 'Platform fee pending hai. Receipt upload karein.';
+            : 'Platform fee is pending. Please upload a receipt.';
 
     return Container(
 
@@ -799,7 +799,7 @@ class _ShopkeeperBillingScreenState extends State<ShopkeeperBillingScreen> {
 
               child: Text(
 
-                'Aapki shop temporarily suspend hai. Details dekhne ke liye tap karein.',
+                'Your shop is temporarily suspended. Tap to see details.',
 
                 style: TextStyle(
 
@@ -1153,7 +1153,7 @@ class _ShopkeeperBillingScreenState extends State<ShopkeeperBillingScreen> {
 
                         const SnackBar(
 
-                      content: Text('Shop load nahi hua. Refresh karein.'),
+                      content: Text('Shop did not load. Please refresh.'),
 
                       backgroundColor: Colors.red,
 
@@ -1171,7 +1171,7 @@ class _ShopkeeperBillingScreenState extends State<ShopkeeperBillingScreen> {
 
                       content:
 
-                          Text('Koi pending fee nahi. Sab clear hai!'),
+                          Text('No pending fee. All clear!'),
 
                       backgroundColor: Colors.green,
 
@@ -1195,7 +1195,7 @@ class _ShopkeeperBillingScreenState extends State<ShopkeeperBillingScreen> {
 
                       content: Text(
 
-                          'Receipt pehle se submit hai. Admin verification ka intezaar karein.'),
+                          'Receipt already submitted. Please wait for admin verification.'),
 
                       backgroundColor: Colors.blue,
 
@@ -1371,7 +1371,7 @@ class _ShopkeeperBillingScreenState extends State<ShopkeeperBillingScreen> {
 
         children: [
 
-          const Text('Billing Kaise Kaam Karta Hai',
+          const Text('How Billing Works',
 
               style: TextStyle(
 
@@ -1385,31 +1385,31 @@ class _ShopkeeperBillingScreenState extends State<ShopkeeperBillingScreen> {
 
           _reminderItem(Icons.shopping_bag_outlined,
 
-              'Har order complete hone par platform fee pending rehti hai'),
+              'Platform fee remains pending after each completed order'),
 
           _reminderItem(Icons.account_balance_wallet_outlined,
 
-              'Saare unpaid orders accumulate hote rehte hain'),
+              'All unpaid orders keep accumulating'),
 
           _reminderItem(Icons.upload_file,
 
-              '"Pay Now" press karo — saare unpaid orders ek batch mein lock ho jaate hain'),
+              '"Press "Pay Now" — all unpaid orders get locked in one batch'),
 
           _reminderItem(Icons.lock_outline,
 
-              'Locked orders ka billingCycleId set ho jata hai — dobara count nahi honge'),
+              'Locked orders get billingCycleId set — they won\'t be counted again'),
 
           _reminderItem(Icons.admin_panel_settings,
 
-              'Admin receipt verify karta hai'),
+              'Admin verifies the receipt'),
 
           _reminderItem(Icons.check_circle_outline,
 
-              'Verify hone ke baad woh orders "paid" — naya cycle shuru'),
+              'After verification those orders become "paid" — new cycle begins'),
 
           _reminderItem(Icons.refresh,
 
-              'Reject hone par woh orders wapas "unpaid" — naye orders ke saath next receipt mein include'),
+              'On rejection those orders go back to "unpaid" — included in next receipt with new orders'),
 
         ],
 
