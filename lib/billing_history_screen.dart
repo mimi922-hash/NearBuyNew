@@ -71,7 +71,7 @@ class BillingHistoryScreen extends StatelessWidget {
                   Icon(Icons.error_outline,
                       size: 64, color: Colors.red.shade300),
                   const SizedBox(height: 16),
-                  Text('Billing history load nahi ho saki.',
+                  Text('Billing history could not be loaded.',
                       style: TextStyle(
                           color: Colors.grey.shade600, fontSize: 16)),
                 ],
@@ -86,12 +86,12 @@ class BillingHistoryScreen extends StatelessWidget {
                   Icon(Icons.receipt_long_outlined,
                       size: 64, color: Colors.grey.shade300),
                   const SizedBox(height: 16),
-                  Text('Koi billing record nahi mila',
+                  Text('No billing record found',
                       style: TextStyle(
                           color: Colors.grey.shade500, fontSize: 16)),
                   const SizedBox(height: 8),
                   Text(
-                      'Pehli receipt upload karein billing history start karne ke liye.',
+                      'Upload your first receipt to start billing history.',
                       style: TextStyle(
                           color: Colors.grey.shade400, fontSize: 13)),
                 ],
@@ -271,7 +271,7 @@ class BillingHistoryScreen extends StatelessWidget {
                                   _showReceiptDialog(context, receiptUrl),
                               icon: const Icon(Icons.image_outlined,
                                   size: 16),
-                              label: const Text('Receipt Dekhen'),
+                              label: const Text('View Receipt'),
                               style: OutlinedButton.styleFrom(
                                 foregroundColor: kOrange,
                                 side: const BorderSide(color: kOrange),
@@ -355,7 +355,7 @@ class BillingHistoryScreen extends StatelessWidget {
                   Icon(Icons.broken_image_outlined,
                       size: 48, color: Colors.grey.shade400),
                   const SizedBox(height: 12),
-                  Text('Receipt image load nahi ho saki.',
+                  Text('Receipt image could not be loaded.',
                       style: TextStyle(
                           color: Colors.grey.shade600, fontSize: 13),
                       textAlign: TextAlign.center),

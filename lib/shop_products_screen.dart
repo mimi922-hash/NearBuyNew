@@ -1,8 +1,15 @@
+// ============================================================
+//  shop_products_screen.dart — NearBuy Redesign
+// ============================================================
+
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_rating_bar/flutter_rating_bar.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'cart_screen.dart'; // ✅ NEW IMPORT
+import 'package:google_fonts/google_fonts.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'cart_screen.dart';
+import 'nearbuy_theme.dart';
 
 class ShopProductsScreen extends StatefulWidget {
   final String shopId;
@@ -14,29 +21,47 @@ class ShopProductsScreen extends StatefulWidget {
   State<ShopProductsScreen> createState() => _ShopProductsScreenState();
 }
 
-class _ShopProductsScreenState extends State<ShopProductsScreen> {
+class _ShopProductsScreenState extends State<ShopProductsScreen>
+    with SingleTickerProviderStateMixin {
   String _searchText = "";
   double _userRating = 0;
   final TextEditingController _commentController = TextEditingController();
   final user = FirebaseAuth.instance.currentUser;
-
   double _avgRating = 0;
-
-  // ⭐ FAVORITE VARIABLE
   bool isFavorite = false;
-
-  // ✅ Cart count variable
   int _cartCount = 0;
+  Map<String, dynamic>? _shopData;
+  late TabController _tabController;
 
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
     _calculateAverageRating();
     checkIfFavorite();
-    _listenCartCount(); // ✅ NEW
+    _listenCartCount();
+    _loadShopData();
   }
 
-  // ✅ NEW: Listen to cart count for this shop
+  @override
+  void dispose() {
+    _tabController.dispose();
+    _commentController.dispose();
+    super.dispose();
+  }
+
+  void _loadShopData() {
+    FirebaseFirestore.instance
+        .collection('shops')
+        .doc(widget.shopId)
+        .snapshots()
+        .listen((doc) {
+      if (doc.exists && mounted) {
+        setState(() => _shopData = doc.data() as Map<String, dynamic>?);
+      }
+    });
+  }
+
   void _listenCartCount() {
     FirebaseFirestore.instance
         .collection('users')
@@ -49,29 +74,21 @@ class _ShopProductsScreenState extends State<ShopProductsScreen> {
       for (var doc in snapshot.docs) {
         total += (doc.data()['quantity'] ?? 1) as int;
       }
-      if (mounted) {
-        setState(() {
-          _cartCount = total;
-        });
-      }
+      if (mounted) setState(() => _cartCount = total);
     });
   }
 
-  // ✅ NEW: Add to cart logic
   Future<void> _addToCart(Map<String, dynamic> productData, String productId) async {
     final cartRef = FirebaseFirestore.instance
         .collection('users')
         .doc(user!.uid)
         .collection('cart')
-        .doc('${widget.shopId}_$productId'); // unique doc per product per shop
+        .doc('${widget.shopId}_$productId');
 
     final existing = await cartRef.get();
-
     if (existing.exists) {
-      // Already in cart — increase quantity
       await cartRef.update({'quantity': (existing.data()!['quantity'] ?? 1) + 1});
     } else {
-      // New item
       await cartRef.set({
         'shopId': widget.shopId,
         'shopName': widget.shopName,
@@ -84,433 +101,255 @@ class _ShopProductsScreenState extends State<ShopProductsScreen> {
       });
     }
 
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('${productData['name']} added to cart'),
-        duration: const Duration(seconds: 1),
-        backgroundColor: const Color(0xFF1565C0),
+        content: Text('${productData['name']} added to cart', style: GoogleFonts.poppins()),
+        backgroundColor: NearBuyColors.navy,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         action: SnackBarAction(
           label: 'View Cart',
-          textColor: Colors.white,
-          onPressed: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => CartScreen(shopId: widget.shopId, shopName: widget.shopName),
-              ),
-            );
-          },
+          textColor: NearBuyColors.orange,
+          onPressed: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => CartScreen(shopId: widget.shopId, shopName: widget.shopName),
+            ),
+          ),
         ),
       ),
     );
   }
 
-  // ---------------- CHECK FAVORITE ----------------
   void checkIfFavorite() async {
-    String userId = FirebaseAuth.instance.currentUser!.uid;
-    var doc = await FirebaseFirestore.instance
+    final doc = await FirebaseFirestore.instance
         .collection('users')
-        .doc(userId)
+        .doc(user!.uid)
         .collection('favorites')
         .doc(widget.shopId)
         .get();
-
-    setState(() {
-      isFavorite = doc.exists;
-    });
+    if (mounted) setState(() => isFavorite = doc.exists);
   }
 
-  // ---------------- TOGGLE FAVORITE ----------------
-  void toggleFavorite() async {
-    String userId = FirebaseAuth.instance.currentUser!.uid;
-
+  void _toggleFavorite() async {
+    final ref = FirebaseFirestore.instance
+        .collection('users')
+        .doc(user!.uid)
+        .collection('favorites')
+        .doc(widget.shopId);
     if (isFavorite) {
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(userId)
-          .collection('favorites')
-          .doc(widget.shopId)
-          .delete();
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Removed from favorites")),
-      );
+      await ref.delete();
     } else {
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(userId)
-          .collection('favorites')
-          .doc(widget.shopId)
-          .set({
+      await ref.set({
         'shopId': widget.shopId,
         'shopName': widget.shopName,
-        'timestamp': FieldValue.serverTimestamp(),
+        'savedAt': FieldValue.serverTimestamp(),
       });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Added to favorites")),
-      );
     }
-
-    setState(() {
-      isFavorite = !isFavorite;
-    });
+    if (mounted) setState(() => isFavorite = !isFavorite);
   }
 
-  // ---------------- CALCULATE AVERAGE RATING ----------------
-  void _calculateAverageRating() {
-    FirebaseFirestore.instance
+  void _calculateAverageRating() async {
+    final snapshot = await FirebaseFirestore.instance
         .collection('shops')
         .doc(widget.shopId)
         .collection('reviews')
-        .snapshots()
-        .listen((snapshot) {
-      if (snapshot.docs.isEmpty) {
-        setState(() {
-          _avgRating = 0;
-        });
-        return;
-      }
+        .get();
+    if (snapshot.docs.isEmpty) return;
+    double total = 0;
+    for (var d in snapshot.docs) total += (d.data()['rating'] ?? 0).toDouble();
+    if (mounted) setState(() => _avgRating = total / snapshot.docs.length);
+  }
 
-      double total = 0;
-      for (var doc in snapshot.docs) {
-        total += (doc.data()['rating'] ?? 0).toDouble();
-      }
+  Future<void> _getDirections() async {
+    final lat = _shopData?['location_lat'];
+    final lng = _shopData?['location_lng'];
+    if (lat == null || lng == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Location not available for this shop', style: GoogleFonts.poppins()),
+          backgroundColor: NearBuyColors.error,
+        ),
+      );
+      return;
+    }
+    final shopName = Uri.encodeComponent(widget.shopName);
+    final Uri googleMapsUri = Uri.parse(
+      'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&destination_place_id=$shopName&travelmode=driving',
+    );
+    if (await canLaunchUrl(googleMapsUri)) {
+      await launchUrl(googleMapsUri, mode: LaunchMode.externalApplication);
+    } else {
+      final Uri geoUri = Uri.parse('geo:$lat,$lng?q=$lat,$lng($shopName)');
+      await launchUrl(geoUri);
+    }
+  }
 
-      setState(() {
-        _avgRating = total / snapshot.docs.length;
-      });
-    });
+  Future<void> _callOwner() async {
+    final phone = _shopData?['phone'] ??
+        _shopData?['contact'] ??
+        _shopData?['owner_contact'] ??
+        _shopData?['owner_phone'] ??
+        _shopData?['phone_number'] ?? '';
+    if (phone.toString().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Phone number not available', style: GoogleFonts.poppins()),
+          backgroundColor: NearBuyColors.error,
+        ),
+      );
+      return;
+    }
+    final Uri telUri = Uri.parse('tel:$phone');
+    if (await canLaunchUrl(telUri)) {
+      await launchUrl(telUri);
+    }
+  }
+
+  void _showReviewBottomSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        padding: EdgeInsets.only(
+          left: 24, right: 24, top: 24,
+          bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(width: 40, height: 4, decoration: BoxDecoration(
+                color: NearBuyColors.divider, borderRadius: BorderRadius.circular(2),
+              )),
+            ),
+            const SizedBox(height: 20),
+            Text('Rate This Shop', style: GoogleFonts.poppins(
+              fontSize: 18, fontWeight: FontWeight.w700, color: NearBuyColors.textPrimary,
+            )),
+            const SizedBox(height: 16),
+            Center(
+              child: RatingBar.builder(
+                initialRating: _userRating,
+                minRating: 1,
+                allowHalfRating: true,
+                itemCount: 5,
+                itemSize: 40,
+                unratedColor: NearBuyColors.divider,
+                itemBuilder: (_, __) => const Icon(Icons.star_rounded, color: NearBuyColors.starYellow),
+                onRatingUpdate: (r) => _userRating = r,
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _commentController,
+              maxLines: 3,
+              style: GoogleFonts.poppins(fontSize: 14, color: NearBuyColors.textPrimary),
+              decoration: InputDecoration(
+                hintText: 'Share your experience...',
+                hintStyle: GoogleFonts.poppins(color: NearBuyColors.textHint),
+                filled: true, fillColor: NearBuyColors.cream,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide(color: NearBuyColors.divider),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide(color: NearBuyColors.divider),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide(color: NearBuyColors.orange, width: 1.5),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: ElevatedButton(
+                onPressed: () async {
+                  if (_userRating == 0) return;
+                  await FirebaseFirestore.instance
+                      .collection('shops')
+                      .doc(widget.shopId)
+                      .collection('reviews')
+                      .add({
+                        'userId': user!.uid,
+                        'name': user!.displayName ?? 'User',
+                        'rating': _userRating,
+                        'comment': _commentController.text,
+                        'createdAt': FieldValue.serverTimestamp(),
+                      });
+                  _commentController.clear();
+                  _calculateAverageRating();
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Review submitted!', style: GoogleFonts.poppins()),
+                      backgroundColor: NearBuyColors.success,
+                      behavior: SnackBarBehavior.floating,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                  );
+                },
+                child: const Text('Submit Review'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════
+  // TEMPORARY CLOSURE CHECK
+  // Firestore mein temporary_closures array check karo —
+  // agar aaj ki date match hoti hai to shop temporarily closed hai
+  // ══════════════════════════════════════════════════════════
+  Map<String, dynamic>? _getTodayTemporaryClosure(Map<String, dynamic>? shopData) {
+    if (shopData == null) return null;
+    final closures = shopData['temporary_closures'];
+    if (closures == null || closures is! List) return null;
+
+    final now = DateTime.now();
+    // Aaj ki date string — Firestore mein "YYYY-MM-DD" format mein store hai
+    final todayStr =
+        '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+
+    for (final item in closures) {
+      if (item is Map<String, dynamic>) {
+        final closureDate = item['date']?.toString() ?? '';
+        // Date string match karo (e.g. "2026-06-01")
+        if (closureDate == todayStr) {
+          return item; // { date: "2026-06-01", reason: "Death" }
+        }
+      }
+    }
+    return null; // Aaj koi closure nahi
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.shopName),
-        backgroundColor: const Color.fromARGB(255, 21, 101, 192),
-        actions: [
-          // ⭐ FAVORITE BUTTON
-          IconButton(
-            icon: Icon(
-              isFavorite ? Icons.favorite : Icons.favorite_border,
-              color: isFavorite ? Colors.red : Colors.white,
-            ),
-            onPressed: toggleFavorite,
-          ),
-
-          // ✅ NEW: Cart icon with badge
-          Stack(
-            alignment: Alignment.center,
-            children: [
-              IconButton(
-                icon: const Icon(Icons.shopping_cart_outlined, color: Colors.white),
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => CartScreen(shopId: widget.shopId, shopName: widget.shopName),
-                    ),
-                  );
-                },
-              ),
-              if (_cartCount > 0)
-                Positioned(
-                  top: 6,
-                  right: 6,
-                  child: Container(
-                    padding: const EdgeInsets.all(3),
-                    decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
-                    child: Text(
-                      '$_cartCount',
-                      style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          // ---------------- Average Rating + Count ----------------
-          Padding(
-            padding: const EdgeInsets.all(12.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Text("Average Rating: ",
-                        style: TextStyle(fontWeight: FontWeight.bold)),
-                    RatingBarIndicator(
-                      rating: _avgRating,
-                      itemBuilder: (context, _) =>
-                          const Icon(Icons.star, color: Colors.amber),
-                      itemCount: 5,
-                      itemSize: 25.0,
-                      direction: Axis.horizontal,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(_avgRating.toStringAsFixed(1)),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                StreamBuilder<QuerySnapshot>(
-                  stream: FirebaseFirestore.instance
-                      .collection('shops')
-                      .doc(widget.shopId)
-                      .collection('reviews')
-                      .snapshots(),
-                  builder: (context, snapshot) {
-                    if (!snapshot.hasData) return const SizedBox();
-                    final count = snapshot.data!.docs.length;
-                    return Text(
-                      "$count ratings",
-                      style: const TextStyle(fontSize: 12, color: Colors.grey),
-                    );
-                  },
-                ),
-              ],
-            ),
-          ),
-
-          // ---------------- Search bar ----------------
-          Padding(
-            padding: const EdgeInsets.all(12.0),
-            child: TextField(
-              decoration: InputDecoration(
-                hintText: "Search Products...",
-                prefixIcon: const Icon(Icons.search),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              onChanged: (value) {
-                setState(() {
-                  _searchText = value.toLowerCase();
-                });
-              },
-            ),
-          ),
-
-          // ---------------- Products List ----------------
-          Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('shops')
-                  .doc(widget.shopId)
-                  .collection('products')
-                  .snapshots(),
-              builder: (context, snapshot) {
-                if (!snapshot.hasData) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
-                final products = snapshot.data!.docs.where((doc) {
-                  final data = doc.data() as Map<String, dynamic>;
-                  final productName =
-                      data['name']?.toString().toLowerCase() ?? "";
-                  return productName.contains(_searchText);
-                }).toList();
-
-                if (products.isEmpty) {
-                  return const Center(child: Text("No products found."));
-                }
-
-                return ListView.builder(
-                  itemCount: products.length,
-                  itemBuilder: (context, index) {
-                    final data = products[index].data() as Map<String, dynamic>;
-                    final productId = products[index].id;
-
-                    return Card(
-                      elevation: 2,
-                      margin: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 8),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
-                      child: Padding(
-                        padding: const EdgeInsets.all(10),
-                        child: Row(
-                          children: [
-                            // Product image
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(10),
-                              child: data['image_url'] != null
-                                  ? Image.network(data['image_url'],
-                                      width: 60, height: 60, fit: BoxFit.cover)
-                                  : Container(
-                                      width: 60,
-                                      height: 60,
-                                      color: Colors.grey.shade200,
-                                      child: const Icon(Icons.image, color: Colors.grey),
-                                    ),
-                            ),
-                            const SizedBox(width: 12),
-
-                            // Product info
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    data['name'] ?? "Unnamed Product",
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.bold, fontSize: 15),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    "Rs. ${data['price'] ?? "0"}",
-                                    style: const TextStyle(
-                                        color: Color(0xFF1565C0),
-                                        fontWeight: FontWeight.w600),
-                                  ),
-                                  if (data['description'] != null &&
-                                      data['description'].toString().isNotEmpty)
-                                    Text(
-                                      data['description'],
-                                      style: TextStyle(
-                                          color: Colors.grey.shade600,
-                                          fontSize: 12),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                ],
-                              ),
-                            ),
-
-                            // ✅ NEW: Add to Cart Button
-                            ElevatedButton(
-                              onPressed: () => _addToCart(data, productId),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFF1565C0),
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                                shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(10)),
-                                minimumSize: const Size(0, 36),
-                              ),
-                              child: const Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.add_shopping_cart, size: 16, color: Colors.white),
-                                  SizedBox(width: 4),
-                                  Text('Add', style: TextStyle(color: Colors.white, fontSize: 13)),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                );
-              },
-            ),
-          ),
-
-          const Divider(),
-
-          // ---------------- Add Review Section ----------------
-          Padding(
-            padding: const EdgeInsets.all(12.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  "Rate this Shop",
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                ),
-                const SizedBox(height: 8),
-                RatingBar.builder(
-                  initialRating: 0,
-                  minRating: 1,
-                  direction: Axis.horizontal,
-                  allowHalfRating: true,
-                  itemCount: 5,
-                  itemPadding: const EdgeInsets.symmetric(horizontal: 4.0),
-                  itemBuilder: (context, _) =>
-                      const Icon(Icons.star, color: Colors.amber),
-                  onRatingUpdate: (rating) {
-                    setState(() {
-                      _userRating = rating;
-                    });
-                  },
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _commentController,
-                  decoration: InputDecoration(
-                    hintText: "Write your review...",
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                  maxLines: 2,
-                ),
-                const SizedBox(height: 8),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                        backgroundColor:
-                            const Color.fromARGB(255, 21, 101, 192)),
-                    child: const Text("Submit Review", style: TextStyle(color: Colors.white)),
-                    onPressed: _submitReview,
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // ---------------- Show Reviews ----------------
-          Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('shops')
-                  .doc(widget.shopId)
-                  .collection('reviews')
-                  .orderBy('timestamp', descending: true)
-                  .snapshots(),
-              builder: (context, snapshot) {
-                if (!snapshot.hasData) return const SizedBox();
-                final reviews = snapshot.data!.docs;
-                if (reviews.isEmpty) {
-                  return const Center(child: Text("No reviews yet."));
-                }
-
-                return ListView.builder(
-                  itemCount: reviews.length,
-                  itemBuilder: (context, index) {
-                    final data = reviews[index].data() as Map<String, dynamic>;
-                    return ListTile(
-                      leading: CircleAvatar(
-                        child: Text(
-                          data['userName'] != null
-                              ? data['userName'][0].toUpperCase()
-                              : "?",
-                        ),
-                      ),
-                      title: Text(
-                          data['userName'] ?? data['userId'] ?? "Anonymous"),
-                      subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          RatingBarIndicator(
-                            rating: (data['rating'] ?? 0).toDouble(),
-                            itemBuilder: (context, _) =>
-                                const Icon(Icons.star, color: Colors.amber),
-                            itemCount: 5,
-                            itemSize: 20.0,
-                            direction: Axis.horizontal,
-                          ),
-                          Text(data['comment'] ?? ""),
-                        ],
-                      ),
-                    );
-                  },
-                );
-              },
+      backgroundColor: NearBuyColors.cream,
+      body: CustomScrollView(
+        slivers: [
+          _buildSliverAppBar(),
+          SliverToBoxAdapter(child: _buildShopInfoCard()),
+          SliverToBoxAdapter(child: _buildGetDirectionsButton()),
+          SliverToBoxAdapter(child: _buildTabBar()),
+          SliverFillRemaining(
+            child: TabBarView(
+              controller: _tabController,
+              children: [_buildProductsTab(), _buildReviewsTab()],
             ),
           ),
         ],
@@ -518,33 +357,824 @@ class _ShopProductsScreenState extends State<ShopProductsScreen> {
     );
   }
 
-  void _submitReview() async {
-    if (_userRating == 0 || _commentController.text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Please provide rating and comment")),
-      );
-      return;
-    }
+  Widget _buildSliverAppBar() {
+    final imageUrl = _shopData?['shop_image'] as String?
+        ?? _shopData?['shop_image_url'] as String?
+        ?? _shopData?['image'] as String?;
 
-    await FirebaseFirestore.instance
-        .collection('shops')
-        .doc(widget.shopId)
-        .collection('reviews')
-        .add({
-      'rating': _userRating,
-      'comment': _commentController.text,
-      'userId': user?.uid,
-      'userName': user?.email ?? "Anonymous",
-      'timestamp': FieldValue.serverTimestamp(),
-    });
+    return SliverAppBar(
+      expandedHeight: 240,
+      pinned: true,
+      backgroundColor: NearBuyColors.navy,
+      leading: IconButton(
+        icon: Container(
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.15),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: const Icon(Icons.arrow_back_ios_new, size: 16, color: Colors.white),
+        ),
+        onPressed: () => Navigator.pop(context),
+      ),
+      actions: [
+        IconButton(
+          icon: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 300),
+            child: Icon(
+              isFavorite ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+              key: ValueKey(isFavorite),
+              color: isFavorite ? Colors.red : Colors.white,
+            ),
+          ),
+          onPressed: _toggleFavorite,
+        ),
+        Stack(
+          children: [
+            IconButton(
+              icon: const Icon(Icons.shopping_cart_outlined, color: Colors.white),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => CartScreen(shopId: widget.shopId, shopName: widget.shopName),
+                ),
+              ),
+            ),
+            if (_cartCount > 0)
+              Positioned(
+                top: 8, right: 8,
+                child: Container(
+                  padding: const EdgeInsets.all(3),
+                  decoration: const BoxDecoration(
+                    color: NearBuyColors.orange,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Text(
+                    '$_cartCount',
+                    style: GoogleFonts.poppins(
+                      fontSize: 9, color: Colors.white, fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(width: 4),
+      ],
+      flexibleSpace: FlexibleSpaceBar(
+        background: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (imageUrl != null && imageUrl.isNotEmpty)
+              Image.network(
+                imageUrl,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => _shopPlaceholder(),
+              )
+            else
+              _shopPlaceholder(),
+            Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Colors.transparent, NearBuyColors.navy.withOpacity(0.85)],
+                ),
+              ),
+            ),
+            Positioned(
+              bottom: 16, left: 16, right: 16,
+              child: Text(
+                widget.shopName,
+                style: GoogleFonts.poppins(
+                  fontSize: 22, fontWeight: FontWeight.w800, color: Colors.white,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
-    _commentController.clear();
-    setState(() {
-      _userRating = 0;
-    });
+  Widget _shopPlaceholder() {
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [NearBuyColors.navy, Color(0xFF2D3F6B)],
+        ),
+      ),
+      child: const Center(
+        child: Icon(Icons.storefront_rounded, size: 80, color: Colors.white24),
+      ),
+    );
+  }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Review submitted")),
+  String _todayKey() {
+    const days = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+    return days[DateTime.now().weekday - 1];
+  }
+
+  Widget _buildShopInfoCard() {
+    return StreamBuilder<DocumentSnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('shops')
+          .doc(widget.shopId)
+          .snapshots(),
+      builder: (ctx, snapshot) {
+        final shopData = snapshot.data?.data() as Map<String, dynamic>?;
+        final address  = shopData?['shop_location'] ?? shopData?['address'] ?? shopData?['location'] ?? 'Address not available';
+        final phone    = shopData?['phone']
+            ?? shopData?['contact']
+            ?? shopData?['owner_contact']
+            ?? shopData?['owner_phone']
+            ?? shopData?['phone_number']
+            ?? '';
+
+        // ── Shop hours (regular schedule)
+        final shopHours  = shopData?['shop_hours'] as Map<String, dynamic>?;
+        final todayKey   = _todayKey();
+        final todayHours = shopHours?[todayKey] as Map<String, dynamic>?;
+        final bool isOpenToday = todayHours?['is_open'] == true;
+        final String openTime  = todayHours?['open_time']  ?? '';
+        final String closeTime = todayHours?['close_time'] ?? '';
+        final fallbackOpen     = shopData?['open_time']  ?? '';
+        final fallbackClose    = shopData?['close_time'] ?? '';
+        final String displayOpen  = openTime.isNotEmpty  ? openTime  : fallbackOpen.toString();
+        final String displayClose = closeTime.isNotEmpty ? closeTime : fallbackClose.toString();
+        final bool showHours      = displayOpen.isNotEmpty;
+
+        // ══════════════════════════════════════════════════
+        // TEMPORARY CLOSURE CHECK
+        // Firestore ke temporary_closures array se aaj ka
+        // closure fetch karo — agar match ho to banner dikhao
+        // ══════════════════════════════════════════════════
+        final todayClosure = _getTodayTemporaryClosure(shopData);
+        final bool isTemporarilyClosed = todayClosure != null;
+        final String closureReason = todayClosure?['reason']?.toString() ?? 'Temporarily Closed';
+
+        return Column(
+          children: [
+            // ── TEMPORARILY CLOSED BANNER ──────────────────
+            // Sirf tab dikhega jab aaj temporary_closures mein entry ho
+            if (isTemporarilyClosed)
+              Container(
+                margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFECEC),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: NearBuyColors.error.withOpacity(0.35)),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: NearBuyColors.error.withOpacity(0.12),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        Icons.store_mall_directory_outlined,
+                        color: NearBuyColors.error,
+                        size: 18,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Shop Temporarily Closed',
+                            style: GoogleFonts.poppins(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: NearBuyColors.error,
+                            ),
+                          ),
+
+                        ],
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: NearBuyColors.error,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        'Closed Today',
+                        style: GoogleFonts.poppins(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+            // ── SHOP INFO CARD ─────────────────────────────
+            Container(
+              margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(color: NearBuyColors.navy.withOpacity(0.06), blurRadius: 16, offset: const Offset(0, 4)),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      StarRatingRow(rating: _avgRating, reviewCount: 0, starSize: 16),
+                      const Spacer(),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: NearBuyColors.verified.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.verified_rounded, size: 13, color: NearBuyColors.verified),
+                            const SizedBox(width: 4),
+                            Text('Verified', style: GoogleFonts.poppins(
+                              fontSize: 11, fontWeight: FontWeight.w600, color: NearBuyColors.verified,
+                            )),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  _infoRow(Icons.location_on_rounded, address, NearBuyColors.orange),
+                  if (phone.toString().isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    GestureDetector(
+                      onTap: _callOwner,
+                      child: Row(
+                        children: [
+                          Icon(Icons.phone_rounded, size: 15, color: NearBuyColors.navy),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              phone.toString(),
+                              style: GoogleFonts.poppins(
+                                fontSize: 13,
+                                color: NearBuyColors.navy,
+                                decoration: TextDecoration.underline,
+                              ),
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: NearBuyColors.navy.withOpacity(0.08),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Text('Call', style: GoogleFonts.poppins(
+                              fontSize: 11, fontWeight: FontWeight.w600, color: NearBuyColors.navy,
+                            )),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ] else ...[
+                    const SizedBox(height: 8),
+                    _infoRow(Icons.phone_rounded, 'Contact not available', NearBuyColors.textSecondary),
+                  ],
+
+                  // ── Open/Close hours row
+                  // Agar aaj temporarily closed hai to "Closed Today" show karo
+                  // warna normal shop_hours dikhao
+                  if (showHours) ...[
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.access_time_rounded,
+                          size: 15,
+                          color: isTemporarilyClosed
+                              ? NearBuyColors.error
+                              : isOpenToday
+                                  ? NearBuyColors.success
+                                  : NearBuyColors.error,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            isTemporarilyClosed
+                                ? '$displayOpen – $displayClose'
+                                : '$displayOpen – $displayClose',
+                            style: GoogleFonts.poppins(
+                              fontSize: 13,
+                              color: NearBuyColors.textSecondary,
+                            ),
+                          ),
+                        ),
+                        // Badge — temporarily closed override karta hai normal status ko
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: isTemporarilyClosed
+                                ? NearBuyColors.error.withOpacity(0.1)
+                                : isOpenToday
+                                    ? NearBuyColors.success.withOpacity(0.1)
+                                    : NearBuyColors.error.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            isTemporarilyClosed
+                                ? 'Closed Today'
+                                : isOpenToday
+                                    ? 'Open'
+                                    : 'Closed',
+                            style: GoogleFonts.poppins(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: isTemporarilyClosed
+                                  ? NearBuyColors.error
+                                  : isOpenToday
+                                      ? NearBuyColors.success
+                                      : NearBuyColors.error,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _infoRow(IconData icon, String text, Color iconColor) {
+    return Row(
+      children: [
+        Icon(icon, size: 15, color: iconColor),
+        const SizedBox(width: 8),
+        Expanded(child: Text(text, style: GoogleFonts.poppins(
+          fontSize: 13, color: NearBuyColors.textSecondary,
+        ))),
+      ],
+    );
+  }
+
+  Widget _buildGetDirectionsButton() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: SizedBox(
+        width: double.infinity,
+        height: 52,
+        child: ElevatedButton.icon(
+          onPressed: _getDirections,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: NearBuyColors.orange,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            elevation: 0,
+          ),
+          icon: const Icon(Icons.directions_rounded, color: Colors.white, size: 20),
+          label: Text('Get Directions', style: GoogleFonts.poppins(
+            fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white,
+          )),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTabBar() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      decoration: BoxDecoration(
+        color: NearBuyColors.navy.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: TabBar(
+        controller: _tabController,
+        indicator: BoxDecoration(
+          color: NearBuyColors.navy,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        indicatorSize: TabBarIndicatorSize.tab,
+        dividerColor: Colors.transparent,
+        labelColor: Colors.white,
+        unselectedLabelColor: NearBuyColors.textSecondary,
+        labelStyle: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600),
+        unselectedLabelStyle: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500),
+        tabs: const [
+          Tab(text: 'Products'),
+          Tab(text: 'Reviews'),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProductsTab() {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: Row(
+            children: [
+              Expanded(
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: NearBuyColors.divider),
+                  ),
+                  child: TextField(
+                    onChanged: (v) => setState(() => _searchText = v.toLowerCase()),
+                    style: GoogleFonts.poppins(fontSize: 13, color: NearBuyColors.textPrimary),
+                    decoration: InputDecoration(
+                      hintText: 'Search products...',
+                      hintStyle: GoogleFonts.poppins(fontSize: 13, color: NearBuyColors.textHint),
+                      prefixIcon: Icon(Icons.search_rounded, color: NearBuyColors.navy, size: 18),
+                      border: InputBorder.none,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance
+                .collection('shops')
+                .doc(widget.shopId)
+                .collection('products')
+                .snapshots(),
+            builder: (ctx, snapshot) {
+              if (!snapshot.hasData) {
+                return const Center(child: CircularProgressIndicator(color: NearBuyColors.navy));
+              }
+              var docs = snapshot.data!.docs.where((doc) {
+                final d = doc.data() as Map<String, dynamic>;
+                if (_searchText.isEmpty) return true;
+                return (d['name'] ?? '').toString().toLowerCase().contains(_searchText);
+              }).toList();
+
+              if (docs.isEmpty) {
+                return Center(child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.inventory_2_outlined, size: 56, color: NearBuyColors.textHint),
+                    const SizedBox(height: 12),
+                    Text('No products found', style: GoogleFonts.poppins(
+                      fontSize: 14, color: NearBuyColors.textSecondary,
+                    )),
+                  ],
+                ));
+              }
+
+              return ListView.builder(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
+                itemCount: docs.length,
+                itemBuilder: (ctx, i) => _ProductCard(
+                  doc: docs[i],
+                  onAddToCart: _addToCart,
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildReviewsTab() {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          child: Row(
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(_avgRating.toStringAsFixed(1), style: GoogleFonts.poppins(
+                    fontSize: 40, fontWeight: FontWeight.w800, color: NearBuyColors.textPrimary,
+                  )),
+                  StarRatingRow(rating: _avgRating, starSize: 18),
+                ],
+              ),
+              const Spacer(),
+              ElevatedButton.icon(
+                onPressed: _showReviewBottomSheet,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: NearBuyColors.navy,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                ),
+                icon: const Icon(Icons.rate_review_rounded, size: 16, color: Colors.white),
+                label: Text('Write Review', style: GoogleFonts.poppins(
+                  fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white,
+                )),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance
+                .collection('shops')
+                .doc(widget.shopId)
+                .collection('reviews')
+                .orderBy('createdAt', descending: true)
+                .snapshots(),
+            builder: (ctx, snapshot) {
+              if (!snapshot.hasData) {
+                return const Center(child: CircularProgressIndicator(color: NearBuyColors.navy));
+              }
+              final reviews = snapshot.data!.docs;
+              if (reviews.isNotEmpty) {
+                double total = 0;
+                for (var d in reviews) {
+                  total += ((d.data() as Map<String, dynamic>)['rating'] ?? 0).toDouble();
+                }
+                final newAvg = total / reviews.length;
+                if (newAvg != _avgRating) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted) setState(() => _avgRating = newAvg);
+                  });
+                }
+              }
+              if (reviews.isEmpty) {
+                return Center(child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.chat_bubble_outline_rounded, size: 56, color: NearBuyColors.textHint),
+                    const SizedBox(height: 12),
+                    Text('No reviews yet', style: GoogleFonts.poppins(
+                      fontSize: 14, color: NearBuyColors.textSecondary,
+                    )),
+                  ],
+                ));
+              }
+              return ListView.builder(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                itemCount: reviews.length,
+                itemBuilder: (ctx, i) => _ReviewCard(doc: reviews[i]),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ─── Product Card ──────────────────────────────────────────
+class _ProductCard extends StatefulWidget {
+  final QueryDocumentSnapshot doc;
+  final Future<void> Function(Map<String, dynamic>, String) onAddToCart;
+
+  const _ProductCard({required this.doc, required this.onAddToCart});
+
+  @override
+  State<_ProductCard> createState() => _ProductCardState();
+}
+
+class _ProductCardState extends State<_ProductCard> {
+  bool _adding = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final data        = widget.doc.data() as Map<String, dynamic>;
+    final name        = data['name'] ?? 'Product';
+    final price       = data['price']?.toString() ?? '0';
+    final imageUrl    = data['image_url'] as String?;
+    final description = data['description'] as String?;
+    final bool isOutOfStock = data['out_of_stock'] == true;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(color: NearBuyColors.navy.withOpacity(0.05), blurRadius: 12, offset: const Offset(0, 3)),
+        ],
+      ),
+      child: Row(
+        children: [
+          Stack(
+            children: [
+              ClipRRect(
+                borderRadius: const BorderRadius.horizontal(left: Radius.circular(16)),
+                child: imageUrl != null && imageUrl.isNotEmpty
+                    ? Image.network(
+                        imageUrl,
+                        width: 90, height: 90, fit: BoxFit.cover,
+                        color: isOutOfStock ? Colors.black.withOpacity(0.35) : null,
+                        colorBlendMode: isOutOfStock ? BlendMode.darken : null,
+                      )
+                    : Container(
+                        width: 90, height: 90,
+                        decoration: BoxDecoration(
+                          color: NearBuyColors.navy.withOpacity(0.05),
+                          borderRadius: const BorderRadius.horizontal(left: Radius.circular(16)),
+                        ),
+                        child: const Icon(Icons.shopping_bag_outlined, color: NearBuyColors.textHint),
+                      ),
+              ),
+            ],
+          ),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          name,
+                          style: GoogleFonts.poppins(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: isOutOfStock ? NearBuyColors.textHint : NearBuyColors.textPrimary,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: isOutOfStock
+                              ? NearBuyColors.error.withOpacity(0.1)
+                              : NearBuyColors.success.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          isOutOfStock ? 'Out of Stock' : 'In Stock',
+                          style: GoogleFonts.poppins(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w700,
+                            color: isOutOfStock ? NearBuyColors.error : NearBuyColors.success,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (description != null && description.isNotEmpty) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      description,
+                      style: GoogleFonts.poppins(fontSize: 11, color: NearBuyColors.textSecondary),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Text(
+                        'Rs. $price',
+                        style: GoogleFonts.poppins(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: isOutOfStock ? NearBuyColors.textHint : NearBuyColors.navy,
+                        ),
+                      ),
+                      const Spacer(),
+                      GestureDetector(
+                        onTap: (isOutOfStock || _adding)
+                            ? null
+                            : () async {
+                                setState(() => _adding = true);
+                                await widget.onAddToCart(data, widget.doc.id);
+                                if (mounted) setState(() => _adding = false);
+                              },
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                          decoration: BoxDecoration(
+                            color: isOutOfStock
+                                ? NearBuyColors.textHint.withOpacity(0.3)
+                                : (_adding
+                                    ? NearBuyColors.navy.withOpacity(0.7)
+                                    : NearBuyColors.navy),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: isOutOfStock
+                              ? Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.remove_shopping_cart_rounded,
+                                        size: 13, color: Colors.white70),
+                                    const SizedBox(width: 4),
+                                    Text('Unavailable',
+                                        style: GoogleFonts.poppins(
+                                            fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white70)),
+                                  ],
+                                )
+                              : (_adding
+                                  ? const SizedBox(
+                                      width: 14, height: 14,
+                                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                  : Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Icon(Icons.add_shopping_cart_rounded,
+                                            size: 13, color: Colors.white),
+                                        const SizedBox(width: 4),
+                                        Text('Add',
+                                            style: GoogleFonts.poppins(
+                                                fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white)),
+                                      ],
+                                    )),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Review Card ───────────────────────────────────────────
+class _ReviewCard extends StatelessWidget {
+  final QueryDocumentSnapshot doc;
+  const _ReviewCard({required this.doc});
+
+  @override
+  Widget build(BuildContext context) {
+    final data    = doc.data() as Map<String, dynamic>;
+    final name    = data['name']    ?? 'User';
+    final rating  = (data['rating'] ?? 0).toDouble();
+    final comment = data['comment'] ?? '';
+    final ts      = data['createdAt'];
+    final date    = ts != null ? (ts as dynamic).toDate() : null;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: NearBuyColors.divider),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 18,
+                backgroundColor: NearBuyColors.navy.withOpacity(0.08),
+                child: Text(name[0].toUpperCase(), style: GoogleFonts.poppins(
+                  fontWeight: FontWeight.w700, color: NearBuyColors.navy, fontSize: 14,
+                )),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(name, style: GoogleFonts.poppins(
+                      fontSize: 13, fontWeight: FontWeight.w600, color: NearBuyColors.textPrimary,
+                    )),
+                    if (date != null)
+                      Text(
+                        '${date.day}/${date.month}/${date.year}',
+                        style: GoogleFonts.poppins(fontSize: 10, color: NearBuyColors.textHint),
+                      ),
+                  ],
+                ),
+              ),
+              StarRatingRow(rating: rating),
+            ],
+          ),
+          if (comment.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(comment, style: GoogleFonts.poppins(
+              fontSize: 13, color: NearBuyColors.textSecondary, height: 1.5,
+            )),
+          ],
+        ],
+      ),
     );
   }
 }

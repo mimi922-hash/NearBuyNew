@@ -216,7 +216,7 @@ class _UploadReceiptScreenState extends State<UploadReceiptScreen> {
 
     if (_txnCtrl.text.trim().isEmpty) {
 
-      setState(() => _validationMsg = 'Transaction ID enter karein');
+      setState(() => _validationMsg = 'Please enter Transaction ID');
 
       return;
 
@@ -224,7 +224,7 @@ class _UploadReceiptScreenState extends State<UploadReceiptScreen> {
 
     if (_receiptImage == null) {
 
-      setState(() => _validationMsg = 'Receipt image upload karein');
+      setState(() => _validationMsg = 'Please upload receipt image');
 
       return;
 
@@ -234,7 +234,7 @@ class _UploadReceiptScreenState extends State<UploadReceiptScreen> {
 
       setState(() =>
 
-          _validationMsg = 'Shop ID missing. Wapas jaayein aur try karein.');
+          _validationMsg = 'Shop ID missing. Please go back and try again.');
 
       return;
 
@@ -242,7 +242,7 @@ class _UploadReceiptScreenState extends State<UploadReceiptScreen> {
 
     if (widget.fee == 0) {
 
-      setState(() => _validationMsg = 'Koi pending fee nahi.');
+      setState(() => _validationMsg = 'No pending fee.');
 
       return;
 
@@ -296,7 +296,7 @@ class _UploadReceiptScreenState extends State<UploadReceiptScreen> {
 
           _validationMsg =
 
-              'Koi unpaid order nahi mila. Submit karne ko kuch nahi.';
+              'No unpaid orders found. Nothing to submit.';
 
           _uploading = false;
 
@@ -322,7 +322,7 @@ class _UploadReceiptScreenState extends State<UploadReceiptScreen> {
 
           _validationMsg =
 
-              'Image upload fail ho gayi.\n\nCheck karein:\n• Internet connection theek hai?\n• Cloudinary config sahi set hai?\n(Cloud name aur upload preset)';
+              'Image upload failed.\n\nPlease check:\n• Is your internet connection working?\n• Is Cloudinary config set correctly?\n(Cloud name and upload preset)';
 
           _uploading = false;
 
@@ -472,7 +472,7 @@ class _UploadReceiptScreenState extends State<UploadReceiptScreen> {
 
         'message':
 
-            'Naya $_selectedMethod receipt submit. Fee: Rs. ${widget.fee} — ${unpaidOrders.length} orders ka batch.',
+            'New $_selectedMethod receipt submitted. Fee: Rs. ${widget.fee} — batch of ${unpaidOrders.length} orders.',
 
         'fee': widget.fee,
 
@@ -494,7 +494,7 @@ class _UploadReceiptScreenState extends State<UploadReceiptScreen> {
 
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
 
-          content: Text('Receipt successfully submit ho gayi!'),
+          content: Text('Receipt submitted successfully!'),
 
           backgroundColor: Colors.green,
 
@@ -542,7 +542,7 @@ class _UploadReceiptScreenState extends State<UploadReceiptScreen> {
 
             onPressed: _uploading ? null : () => Navigator.pop(context)),
 
-        title: const Text('Receipt Upload Karein',
+        title: const Text('Upload Receipt',
 
             style: TextStyle(
 
@@ -608,15 +608,15 @@ class _UploadReceiptScreenState extends State<UploadReceiptScreen> {
 
                 _uploadProgress < 0.3
 
-                    ? 'Orders check ho rahe hain...'
+                    ? 'Checking orders...'
 
                     : _uploadProgress < 0.6
 
-                        ? 'Receipt Cloudinary pe upload ho rahi hai...'
+                        ? 'Uploading receipt to Cloudinary...'
 
                         : _uploadProgress < 0.9
 
-                            ? 'Billing cycle save ho raha hai...'
+                            ? 'Saving billing cycle...'
 
                             : 'Almost done...',
 
@@ -724,7 +724,7 @@ class _UploadReceiptScreenState extends State<UploadReceiptScreen> {
 
                           SizedBox(width: 12),
 
-                          Text('Upload ho raha hai...',
+                          Text('Uploading...',
 
                               style: TextStyle(
 
@@ -738,7 +738,7 @@ class _UploadReceiptScreenState extends State<UploadReceiptScreen> {
 
                       )
 
-                    : const Text('Verification Ke Liye Submit Karein',
+                    : const Text('Submit for Verification',
 
                         style: TextStyle(
 
@@ -830,7 +830,7 @@ class _UploadReceiptScreenState extends State<UploadReceiptScreen> {
 
                       fontWeight: FontWeight.bold)),
 
-              const Text('Saare unpaid orders cover honge',
+              const Text('All unpaid orders will be covered',
 
                   style: TextStyle(color: Colors.white70, fontSize: 11)),
 
@@ -876,7 +876,7 @@ class _UploadReceiptScreenState extends State<UploadReceiptScreen> {
 
             child: Text(
 
-              'Bilkul Rs. ${widget.fee} pay karein. Receipt clear aur readable honi chahiye. Amount exactly match karna zaroori hai.',
+              'Pay exactly Rs. ${widget.fee}. The receipt must be clear and readable. The amount must match exactly.',
 
               style: TextStyle(color: Colors.blue.shade800, fontSize: 13),
 
@@ -942,7 +942,7 @@ class _UploadReceiptScreenState extends State<UploadReceiptScreen> {
 
             label: 'Transaction ID',
 
-            hint: 'Transaction ID enter karein',
+            hint: 'Enter Transaction ID',
 
             icon: Icons.confirmation_number_outlined,
 
@@ -1002,7 +1002,7 @@ class _UploadReceiptScreenState extends State<UploadReceiptScreen> {
 
             label: 'Note (Optional)',
 
-            hint: 'Koi additional info...',
+            hint: 'Any additional info...',
 
             icon: Icons.note_outlined,
 

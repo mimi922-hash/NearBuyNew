@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'payment_verification_screen.dart';
 import 'suspended_shops_screen.dart';
 import 'billing_workflow_screen.dart';
+import 'admin_dashboard.dart';
 
 class AdminBillingScreen extends StatefulWidget {
   const AdminBillingScreen({super.key});
@@ -14,6 +15,7 @@ class AdminBillingScreen extends StatefulWidget {
 class _AdminBillingScreenState extends State<AdminBillingScreen> {
   static const Color kOrange = Color(0xFFFF6B00);
   static const Color kNavy = Color(0xFF0D1B3E);
+  static const Color kNavyCard = Color(0xFF112240);
 
   int _pendingCount = 0;
   int _suspendedCount = 0;
@@ -29,12 +31,9 @@ class _AdminBillingScreenState extends State<AdminBillingScreen> {
   }
 
   Future<void> _loadStats() async {
-    final billing = await FirebaseFirestore.instance
-        .collection('billing')
-        .get();
-    final shops = await FirebaseFirestore.instance
-        .collection('shops')
-        .get();
+    final billing =
+        await FirebaseFirestore.instance.collection('billing').get();
+    final shops = await FirebaseFirestore.instance.collection('shops').get();
 
     int pending = 0;
     int suspended = 0;
@@ -44,10 +43,8 @@ class _AdminBillingScreenState extends State<AdminBillingScreen> {
 
     for (var doc in billing.docs) {
       final data = doc.data();
-      // Option C: 'pending_verification' status
       final status = data['payment_status'] ?? 'pending_verification';
       if (status == 'pending_verification') pending++;
-      // Option C: 'paid' status (approved)
       if (status == 'paid') {
         revenue += (data['total_platform_fee'] ?? 0).toDouble();
       }
@@ -56,8 +53,10 @@ class _AdminBillingScreenState extends State<AdminBillingScreen> {
 
     for (var doc in shops.docs) {
       final st = doc.data()['status'] ?? 'verified';
-      if (st == 'suspended') suspended++;
-      else active++;
+      if (st == 'suspended')
+        suspended++;
+      else
+        active++;
     }
 
     recent.sort((a, b) {
@@ -80,8 +79,7 @@ class _AdminBillingScreenState extends State<AdminBillingScreen> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Scaffold(
-          body: Center(child: CircularProgressIndicator()));
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     return Scaffold(
@@ -157,31 +155,27 @@ class _AdminBillingScreenState extends State<AdminBillingScreen> {
                   color: kOrange.withOpacity(0.2),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Icon(Icons.monetization_on,
-                    color: kOrange, size: 26),
+                child:
+                    const Icon(Icons.monetization_on, color: kOrange, size: 26),
               ),
               const SizedBox(width: 12),
               const Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text('Total Platform Revenue',
-                      style:
-                          TextStyle(color: Colors.white70, fontSize: 13)),
+                      style: TextStyle(color: Colors.white70, fontSize: 13)),
                   SizedBox(height: 2),
-                  Text('Saari verified payments',
-                      style:
-                          TextStyle(color: Colors.white38, fontSize: 11)),
+                  Text('All verified payments',
+                      style: TextStyle(color: Colors.white38, fontSize: 11)),
                 ],
               ),
             ],
           ),
           const SizedBox(height: 20),
           Text(
-            'Rs. ${_totalRevenue.toStringAsFixed(0)}',
+            'PKR ${_totalRevenue.toStringAsFixed(0)}',
             style: const TextStyle(
-                color: Colors.white,
-                fontSize: 34,
-                fontWeight: FontWeight.bold),
+                color: Colors.white, fontSize: 34, fontWeight: FontWeight.bold),
           ),
         ],
       ),
@@ -191,7 +185,7 @@ class _AdminBillingScreenState extends State<AdminBillingScreen> {
   Widget _buildStatsGrid() {
     final stats = [
       {
-        'label': 'Pending Reviews',
+        'label': 'Pending\nReviews',
         'value': '$_pendingCount',
         'icon': Icons.pending_actions,
         'color': Colors.blue
@@ -203,8 +197,10 @@ class _AdminBillingScreenState extends State<AdminBillingScreen> {
         'color': Colors.green
       },
       {
-        'label': 'Suspended Shops',
-        'value': '$_suspendedCount',
+        'label': 'Suspended\nShops',
+        'value': _suspendedCount < 10
+            ? '0$_suspendedCount'
+            : '$_suspendedCount',
         'icon': Icons.block_outlined,
         'color': Colors.red
       },
@@ -239,8 +235,7 @@ class _AdminBillingScreenState extends State<AdminBillingScreen> {
                         fontSize: 22,
                         color: s['color'] as Color)),
                 Text(s['label'] as String,
-                    style: const TextStyle(
-                        fontSize: 10, color: Colors.grey)),
+                    style: const TextStyle(fontSize: 10, color: Colors.grey)),
               ],
             ),
           ),
@@ -252,19 +247,19 @@ class _AdminBillingScreenState extends State<AdminBillingScreen> {
   Widget _buildQuickNav(BuildContext context) {
     final navItems = [
       {
-        'label': 'Verify Payments',
+        'label': 'Verify\nPayments',
         'icon': Icons.verified_user_outlined,
         'color': kOrange,
         'screen': const PaymentVerificationScreen()
       },
       {
-        'label': 'Suspended Shops',
+        'label': 'Suspended\nShops',
         'icon': Icons.block,
         'color': Colors.red,
         'screen': const SuspendedShopsScreen()
       },
       {
-        'label': 'Billing Workflow',
+        'label': 'Billing\nWorkflow',
         'icon': Icons.account_tree_outlined,
         'color': kNavy,
         'screen': const BillingWorkflowScreen()
@@ -284,17 +279,15 @@ class _AdminBillingScreenState extends State<AdminBillingScreen> {
           children: navItems.map((item) {
             return Expanded(
               child: GestureDetector(
-                onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) => item['screen'] as Widget)),
+                onTap: () => Navigator.push(context,
+                    MaterialPageRoute(builder: (_) => item['screen'] as Widget)),
                 child: Container(
                   margin: EdgeInsets.only(
                       right: navItems.indexOf(item) < navItems.length - 1
                           ? 10
                           : 0),
-                  padding: const EdgeInsets.symmetric(
-                      vertical: 16, horizontal: 8),
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
                   decoration: BoxDecoration(
                     color: (item['color'] as Color).withOpacity(0.08),
                     borderRadius: BorderRadius.circular(14),
@@ -312,6 +305,9 @@ class _AdminBillingScreenState extends State<AdminBillingScreen> {
                               fontWeight: FontWeight.w600,
                               color: item['color'] as Color),
                           textAlign: TextAlign.center),
+                      const SizedBox(height: 4),
+                      Icon(Icons.arrow_forward,
+                          size: 14, color: item['color'] as Color),
                     ],
                   ),
                 ),
@@ -348,18 +344,25 @@ class _AdminBillingScreenState extends State<AdminBillingScreen> {
         ),
         const SizedBox(height: 8),
         ..._recentRequests.map((data) {
-          // Option C: Updated status labels
           final status = data['payment_status'] ?? 'pending_verification';
           final color = status == 'paid'
               ? Colors.green
               : status == 'rejected'
                   ? Colors.red
-                  : Colors.blue;
+                  : Colors.orange;
           final statusLabel = status == 'paid'
               ? 'Approved'
               : status == 'rejected'
                   ? 'Rejected'
-                  : 'Under Review';
+                  : 'Pending';
+
+          String dateStr = '';
+          final submittedAt = data['submitted_at'];
+          if (submittedAt != null && submittedAt is Timestamp) {
+            final dt = submittedAt.toDate();
+            dateStr =
+                '${dt.day} May ${dt.year}  ${dt.hour}:${dt.minute.toString().padLeft(2, '0')} ${dt.hour >= 12 ? 'PM' : 'AM'}';
+          }
 
           return Container(
             margin: const EdgeInsets.only(bottom: 10),
@@ -377,14 +380,14 @@ class _AdminBillingScreenState extends State<AdminBillingScreen> {
             child: Row(
               children: [
                 Container(
-                  width: 40,
-                  height: 40,
+                  width: 44,
+                  height: 44,
                   decoration: BoxDecoration(
-                    color: color.withOpacity(0.1),
+                    color: Colors.green.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child:
-                      Icon(Icons.receipt_outlined, color: color, size: 20),
+                  child: const Icon(Icons.receipt_outlined,
+                      color: Colors.green, size: 22),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -396,24 +399,40 @@ class _AdminBillingScreenState extends State<AdminBillingScreen> {
                               fontWeight: FontWeight.bold,
                               fontSize: 14,
                               color: Color(0xFF0D1B3E))),
-                      Text('Fee: Rs. ${data['total_platform_fee'] ?? 0}',
+                      Text('Fee: PKR ${data['total_platform_fee'] ?? 0}',
                           style: const TextStyle(
                               fontSize: 12, color: Colors.grey)),
+                      if (data['shop_name'] != null)
+                        Text('Shop: ${data['shop_name']}',
+                            style: const TextStyle(
+                                fontSize: 12, color: Colors.grey)),
                     ],
                   ),
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: color.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(statusLabel,
-                      style: TextStyle(
-                          color: color,
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold)),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: color.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(statusLabel,
+                          style: TextStyle(
+                              color: color,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold)),
+                    ),
+                    if (dateStr.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(dateStr,
+                            style: const TextStyle(
+                                fontSize: 10, color: Colors.grey)),
+                      ),
+                  ],
                 ),
               ],
             ),
@@ -424,35 +443,93 @@ class _AdminBillingScreenState extends State<AdminBillingScreen> {
   }
 
   Widget _buildBottomNav(BuildContext context) {
+    final items = [
+      {'icon': Icons.dashboard_rounded, 'label': 'Dashboard'},
+      {'icon': Icons.store_rounded, 'label': 'Shops'},
+      {'icon': Icons.account_balance_wallet_rounded, 'label': 'Billing'},
+      {'icon': Icons.bar_chart_rounded, 'label': 'Reports'},
+    ];
+
     return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withOpacity(0.08),
-              blurRadius: 12,
-              offset: const Offset(0, -3))
-        ],
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+      decoration: const BoxDecoration(
+        color: kNavyCard,
+        border: Border(top: BorderSide(color: Colors.white10, width: 0.5)),
       ),
-      child: BottomNavigationBar(
-        backgroundColor: Colors.white,
-        selectedItemColor: kOrange,
-        unselectedItemColor: Colors.grey,
-        type: BottomNavigationBarType.fixed,
-        currentIndex: 2,
-        items: const [
-          BottomNavigationBarItem(
-              icon: Icon(Icons.dashboard_outlined), label: 'Dashboard'),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.receipt_outlined), label: 'Orders'),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.account_balance_wallet_outlined),
-              label: 'Billing'),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.store_outlined), label: 'Shops'),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.person_outline), label: 'Profile'),
-        ],
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: List.generate(items.length, (i) {
+          // Billing tab (index 2) is active
+          final active = i == 2;
+          return GestureDetector(
+            onTap: () {
+              switch (i) {
+                case 0:
+                  // Go to Admin Dashboard
+                  Navigator.pushAndRemoveUntil(
+                    context,
+                    MaterialPageRoute(builder: (_) => const AdminDashboard()),
+                    (route) => false,
+                  );
+                  break;
+                case 1:
+                  // Go to Admin Dashboard and scroll to shops
+                  Navigator.pushAndRemoveUntil(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) =>
+                            const AdminDashboard(scrollToShops: true)),
+                    (route) => false,
+                  );
+                  break;
+                case 2:
+                  // Already on Billing — no action needed
+                  break;
+                case 3:
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: const Text('Reports coming soon!'),
+                      backgroundColor: kNavyCard,
+                      behavior: SnackBarBehavior.floating,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                    ),
+                  );
+                  break;
+              }
+            },
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: active
+                        ? const Color(0xFFFF6B00).withOpacity(0.15)
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    items[i]['icon'] as IconData,
+                    color: active ? const Color(0xFFFF6B00) : Colors.white54,
+                    size: 22,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  items[i]['label'] as String,
+                  style: TextStyle(
+                    color: active ? const Color(0xFFFF6B00) : Colors.white38,
+                    fontSize: 10,
+                    fontWeight:
+                        active ? FontWeight.w600 : FontWeight.normal,
+                  ),
+                ),
+              ],
+            ),
+          );
+        }),
       ),
     );
   }
