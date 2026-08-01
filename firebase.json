@@ -1,1 +1,41 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"smart-locator-app","appId":"1:1092033191109:android:100c100fc70d3786f6e4ac","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"smart-locator-app","configurations":{"android":"1:1092033191109:android:100c100fc70d3786f6e4ac","ios":"1:1092033191109:ios:b0d20b46ebaac613f6e4ac","macos":"1:1092033191109:ios:b0d20b46ebaac613f6e4ac","web":"1:1092033191109:web:206335083a2edd2df6e4ac","windows":"1:1092033191109:web:2849c00dc4d75d8ff6e4ac"}}}}}}
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "smart-locator-app",
+          "appId": "1:1092033191109:android:100c100fc70d3786f6e4ac",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "smart-locator-app",
+          "configurations": {
+            "android": "1:1092033191109:android:100c100fc70d3786f6e4ac",
+            "ios": "1:1092033191109:ios:b0d20b46ebaac613f6e4ac",
+            "macos": "1:1092033191109:ios:b0d20b46ebaac613f6e4ac",
+            "web": "1:1092033191109:web:206335083a2edd2df6e4ac",
+            "windows": "1:1092033191109:web:2849c00dc4d75d8ff6e4ac"
+          }
+        }
+      }
+    }
+  },
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "default",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log",
+        "*.local"
+      ],
+      "predeploy": [
+        "npm --prefix \"$RESOURCE_DIR\" run lint"
+      ]
+    }
+  ]
+}

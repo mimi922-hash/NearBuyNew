@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'role_selection_screen.dart';
 import 'customer_dashboard.dart';
 import 'shopkeeper_dashboard.dart';
@@ -76,6 +77,17 @@ class _LoginScreenState extends State<LoginScreen>
         return;
       }
       final savedRole = userDoc['role'] ?? '';
+
+      // Save FCM Token
+      String? fcmToken = await FirebaseMessaging.instance.getToken();
+
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .update({
+        'fcmToken': fcmToken,
+      });
+
       if (savedRole == 'Admin') {
         if (uid != mainAdminUID || email != mainAdminEmail) {
           _showSnack('Access Denied! Only main Admin can login.', Colors.red);
