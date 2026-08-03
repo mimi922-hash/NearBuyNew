@@ -11,6 +11,55 @@ import 'package:url_launcher/url_launcher.dart';
 import 'cart_screen.dart';
 import 'nearbuy_theme.dart';
 
+// ══════════════════════════════════════════════════════════
+// BACKWARD-COMPATIBLE REVIEW FIELD HELPERS (file-private)
+// Old reviews:  userId, name, rating, comment, createdAt
+// New reviews:  userId, userName, profilePic, rating, comment, timestamp
+// Shared by _ShopProductsScreenState and _ReviewCard below.
+// ══════════════════════════════════════════════════════════
+
+/// Rating: handles int, double, numeric string, or missing -> 0.
+double _parseRating(dynamic r) {
+  if (r is int) return r.toDouble();
+  if (r is double) return r;
+  if (r is String) return double.tryParse(r) ?? 0;
+  return 0;
+}
+
+/// Name: userName (new) -> name (old) -> userId -> 'Anonymous'.
+String _getUserName(Map<String, dynamic> data) {
+  final userName = data['userName'];
+  if (userName != null && userName.toString().trim().isNotEmpty) return userName.toString();
+  final name = data['name'];
+  if (name != null && name.toString().trim().isNotEmpty) return name.toString();
+  final userId = data['userId'];
+  if (userId != null && userId.toString().trim().isNotEmpty) return userId.toString();
+  return 'Anonymous';
+}
+
+/// Profile pic: 'profilePic' only --- old reviews never had this field,
+/// so missing/empty just falls back to the initial-letter avatar.
+String? _getProfilePic(Map<String, dynamic> data) {
+  final pic = data['profilePic'];
+  if (pic != null && pic.toString().trim().isNotEmpty) return pic.toString();
+  return null;
+}
+
+/// Date: timestamp (new) -> createdAt (old) -> null if neither exists.
+DateTime? _getReviewDate(Map<String, dynamic> data) {
+  final ts = data['timestamp'];
+  if (ts is Timestamp) return ts.toDate();
+  final created = data['createdAt'];
+  if (created is Timestamp) return created.toDate();
+  return null;
+}
+
+/// Comment: always a safe string, never null.
+String _getComment(Map<String, dynamic> data) {
+  final c = data['comment'];
+  return c?.toString() ?? '';
+}
+
 class ShopProductsScreen extends StatefulWidget {
   final String shopId;
   final String shopName;
@@ -79,6 +128,43 @@ class _ShopProductsScreenState extends State<ShopProductsScreen>
   }
 
   Future<void> _addToCart(Map<String, dynamic> productData, String productId) async {
+    // ── FIX: Shop-suspended guard ──────────────────────────
+    // Blocks ordering the moment shops.status becomes 'suspended' —
+    // _shopData is already kept live via the snapshots() listener in
+    // _loadShopData(), so this reflects the shopkeeper-side auto-suspend
+    // (and the admin dashboard's manual suspend) the instant it lands in
+    // Firestore, with no extra query needed here.
+    if (_isShopSuspended) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('This shop is currently suspended', style: GoogleFonts.poppins()),
+          backgroundColor: NearBuyColors.error,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      );
+      return;
+    }
+
+    // ── Shop-closed guard ──────────────────────────────────
+    // Extra safety net: even though the Add button is already disabled
+    // in the UI when the shop is closed, this blocks the actual write
+    // too (e.g. if triggered programmatically), without touching any
+    // other existing behaviour of this function.
+    if (!_isShopOpenNow) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('This shop is currently closed', style: GoogleFonts.poppins()),
+          backgroundColor: NearBuyColors.error,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      );
+      return;
+    }
+
     final cartRef = FirebaseFirestore.instance
         .collection('users')
         .doc(user!.uid)
@@ -158,8 +244,40 @@ class _ShopProductsScreenState extends State<ShopProductsScreen>
         .get();
     if (snapshot.docs.isEmpty) return;
     double total = 0;
-    for (var d in snapshot.docs) total += (d.data()['rating'] ?? 0).toDouble();
-    if (mounted) setState(() => _avgRating = total / snapshot.docs.length);
+    int ratedCount = 0;
+    for (var d in snapshot.docs) {
+      final rating = d.data()['rating'];
+      if (rating == null) continue; // old/new review missing rating --- skip, don't count as 0
+      total += _parseRating(rating);
+      ratedCount++;
+    }
+    if (mounted) setState(() => _avgRating = ratedCount > 0 ? total / ratedCount : 0);
+  }
+
+  // ── Resolves the reviewer's display name + profile pic before submitting.
+  // Name priority: Firestore users/{uid}.name -> FirebaseAuth displayName -> 'Anonymous'
+  // Profile pic: Firestore users/{uid}.profile_image (same field customer_dashboard.dart uses)
+  Future<Map<String, String?>> _fetchReviewerProfile() async {
+    String name = user?.displayName ?? 'Anonymous';
+    String? profilePic;
+    try {
+      final doc = await FirebaseFirestore.instance.collection('users').doc(user!.uid).get();
+      if (doc.exists) {
+        final data = doc.data();
+        final firestoreName = data?['name'];
+        if (firestoreName != null && firestoreName.toString().trim().isNotEmpty) {
+          name = firestoreName.toString();
+        }
+        final pic = data?['profile_image'];
+        if (pic != null && pic.toString().trim().isNotEmpty) {
+          profilePic = pic.toString();
+        }
+      }
+    } catch (_) {
+      // Firestore lookup failed --- fall back to Auth displayName / Anonymous,
+      // never block review submission because of this.
+    }
+    return {'name': name, 'profilePic': profilePic};
   }
 
   Future<void> _getDirections() async {
@@ -277,28 +395,53 @@ class _ShopProductsScreenState extends State<ShopProductsScreen>
               child: ElevatedButton(
                 onPressed: () async {
                   if (_userRating == 0) return;
-                  await FirebaseFirestore.instance
-                      .collection('shops')
-                      .doc(widget.shopId)
-                      .collection('reviews')
-                      .add({
-                        'userId': user!.uid,
-                        'name': user!.displayName ?? 'User',
-                        'rating': _userRating,
-                        'comment': _commentController.text,
-                        'createdAt': FieldValue.serverTimestamp(),
-                      });
-                  _commentController.clear();
-                  _calculateAverageRating();
-                  Navigator.pop(ctx);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Review submitted!', style: GoogleFonts.poppins()),
-                      backgroundColor: NearBuyColors.success,
-                      behavior: SnackBarBehavior.floating,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
-                  );
+
+                  final profile = await _fetchReviewerProfile();
+                  final commentText = _commentController.text.trim();
+
+                  try {
+                    // widget.shopId is the exact same id passed in from
+                    // CustomerDashboard -> ShopProductsScreen, so this
+                    // always lands under the correct shop's document.
+                    await FirebaseFirestore.instance
+                        .collection('shops')
+                        .doc(widget.shopId)
+                        .collection('reviews')
+                        .add({
+                          'userId': user!.uid,
+                          'userName': profile['name'],
+                          'profilePic': profile['profilePic'],
+                          'rating': _userRating,
+                          'comment': commentText,
+                          'timestamp': FieldValue.serverTimestamp(),
+                        });
+
+                    _commentController.clear();
+                    if (mounted) setState(() => _userRating = 0);
+                    _calculateAverageRating();
+
+                    if (!ctx.mounted) return;
+                    Navigator.pop(ctx);
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Review submitted!', style: GoogleFonts.poppins()),
+                        backgroundColor: NearBuyColors.success,
+                        behavior: SnackBarBehavior.floating,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                    );
+                  } catch (e) {
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Could not submit review. Please try again.', style: GoogleFonts.poppins()),
+                        backgroundColor: NearBuyColors.error,
+                        behavior: SnackBarBehavior.floating,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                    );
+                  }
                 },
                 child: const Text('Submit Review'),
               ),
@@ -334,6 +477,56 @@ class _ShopProductsScreenState extends State<ShopProductsScreen>
       }
     }
     return null; // Aaj koi closure nahi
+  }
+
+  // ══════════════════════════════════════════════════════════
+  // SHOP SUSPENDED CHECK — used to gate "Add to Cart"
+  // ══════════════════════════════════════════════════════════
+  //
+  // FIX (new): _shopData is already kept live via the snapshots()
+  // listener in _loadShopData(), so this reflects `shops.status`
+  // ('suspended' vs anything else) the instant it changes — including
+  // the auto-suspend write from ShopkeeperBillingScreen's grace-period
+  // timer, and the manual suspend/reactivate actions on the admin side.
+  // Defensive by design, same as _isShopOpenNow below: if shop data
+  // hasn't loaded yet, we default to "not suspended" so we never wrongly
+  // block a purchase just because of a brief loading gap.
+  bool get _isShopSuspended {
+    if (_shopData == null) return false; // not loaded yet — don't block
+    return _shopData?['status'] == 'suspended';
+  }
+
+  // ══════════════════════════════════════════════════════════
+  // SHOP OPEN/CLOSED STATUS — used to gate "Add to Cart"
+  // ══════════════════════════════════════════════════════════
+  //
+  // Reuses the exact same signals that _buildShopInfoCard() already shows
+  // to the user as the "Open" / "Closed" / "Closed Today" badge, so the
+  // Add-to-Cart button always matches what's on screen. Nothing in
+  // _buildShopInfoCard() itself is touched — this just re-derives the
+  // same status from `_shopData` (already kept in state via _loadShopData)
+  // so it can also be used inside the Products tab / product cards.
+  //
+  // Defensive by design: if shop data hasn't loaded yet, or the shop_hours
+  // structure is missing/incomplete for today, we default to "open" so we
+  // never wrongly block a purchase just because of missing data — exactly
+  // like the other defensive filters already in this codebase.
+  bool get _isShopOpenNow {
+    if (_shopData == null) return true; // not loaded yet — don't block
+
+    // Temporary closure always wins, same as the banner logic.
+    if (_getTodayTemporaryClosure(_shopData) != null) return false;
+
+    final shopHours = _shopData?['shop_hours'] as Map<String, dynamic>?;
+    if (shopHours == null) return true; // no structured hours — can't confirm closed
+
+    final todayHours = shopHours[_todayKey()] as Map<String, dynamic>?;
+    if (todayHours == null) return true; // no entry for today — can't confirm closed
+
+    final isOpenFlag = todayHours['is_open'];
+    if (isOpenFlag == null) return true; // flag missing — can't confirm closed
+
+    return isOpenFlag == true;
   }
 
   @override
@@ -784,6 +977,59 @@ class _ShopProductsScreenState extends State<ShopProductsScreen>
   Widget _buildProductsTab() {
     return Column(
       children: [
+        // ── FIX: Shop-suspended notice strip ───────────────
+        // Takes priority over the "closed" strip below — if the shop is
+        // suspended, that's the more specific/severe reason and should be
+        // the only banner shown.
+        if (_isShopSuspended)
+          Container(
+            margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: NearBuyColors.error.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: NearBuyColors.error.withOpacity(0.3)),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.block_rounded, size: 16, color: NearBuyColors.error),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'This shop is currently suspended and is not accepting orders.',
+                    style: GoogleFonts.poppins(fontSize: 11.5, color: NearBuyColors.error, fontWeight: FontWeight.w500),
+                  ),
+                ),
+              ],
+            ),
+          )
+        // ── Shop-closed notice strip ──────────────────────
+        // Sirf Products tab ke oopar dikhta hai jab shop abhi closed ho.
+        // Products tab / list ko yahan touch nahi kiya — sirf ek info
+        // strip add ki hai, taake user samajh sake products dekh sakta
+        // hai lekin order abhi nahi kar sakta.
+        else if (!_isShopOpenNow)
+          Container(
+            margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: NearBuyColors.error.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: NearBuyColors.error.withOpacity(0.3)),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.info_outline_rounded, size: 16, color: NearBuyColors.error),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'This shop is currently closed. You can browse products, but ordering is disabled until it reopens.',
+                    style: GoogleFonts.poppins(fontSize: 11.5, color: NearBuyColors.error, fontWeight: FontWeight.w500),
+                  ),
+                ),
+              ],
+            ),
+          ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
           child: Row(
@@ -847,6 +1093,11 @@ class _ShopProductsScreenState extends State<ShopProductsScreen>
                 itemBuilder: (ctx, i) => _ProductCard(
                   doc: docs[i],
                   onAddToCart: _addToCart,
+                  // FIX: shop-open flag now also folds in the suspension
+                  // check, so the Add button is disabled and shows the
+                  // same "unavailable" treatment for a suspended shop as
+                  // it already does for a closed one.
+                  isShopOpen: _isShopOpenNow && !_isShopSuspended,
                 ),
               );
             },
@@ -890,23 +1141,42 @@ class _ShopProductsScreenState extends State<ShopProductsScreen>
         ),
         Expanded(
           child: StreamBuilder<QuerySnapshot>(
+            // NOTE: no orderBy() here on purpose --- old reviews may be
+            // missing `createdAt` (and new ones don't have it at all,
+            // they use `timestamp`), so ordering by either field server-side
+            // would silently drop documents missing that field. Sorting is
+            // done client-side below instead, so old + new reviews always
+            // show up and no extra Firestore index is required.
             stream: FirebaseFirestore.instance
                 .collection('shops')
                 .doc(widget.shopId)
                 .collection('reviews')
-                .orderBy('createdAt', descending: true)
                 .snapshots(),
             builder: (ctx, snapshot) {
               if (!snapshot.hasData) {
                 return const Center(child: CircularProgressIndicator(color: NearBuyColors.navy));
               }
-              final reviews = snapshot.data!.docs;
+              final reviews = List<QueryDocumentSnapshot>.from(snapshot.data!.docs);
+              // Latest first; reviews with no usable date (old docs missing
+              // both timestamp & createdAt) are pushed to the bottom.
+              reviews.sort((a, b) {
+                final da = _getReviewDate(a.data() as Map<String, dynamic>);
+                final db = _getReviewDate(b.data() as Map<String, dynamic>);
+                if (da == null && db == null) return 0;
+                if (da == null) return 1;
+                if (db == null) return -1;
+                return db.compareTo(da);
+              });
               if (reviews.isNotEmpty) {
                 double total = 0;
+                int ratedCount = 0;
                 for (var d in reviews) {
-                  total += ((d.data() as Map<String, dynamic>)['rating'] ?? 0).toDouble();
+                  final rating = (d.data() as Map<String, dynamic>)['rating'];
+                  if (rating == null) continue;
+                  total += _parseRating(rating);
+                  ratedCount++;
                 }
-                final newAvg = total / reviews.length;
+                final newAvg = ratedCount > 0 ? total / ratedCount : 0.0;
                 if (newAvg != _avgRating) {
                   WidgetsBinding.instance.addPostFrameCallback((_) {
                     if (mounted) setState(() => _avgRating = newAvg);
@@ -942,8 +1212,17 @@ class _ShopProductsScreenState extends State<ShopProductsScreen>
 class _ProductCard extends StatefulWidget {
   final QueryDocumentSnapshot doc;
   final Future<void> Function(Map<String, dynamic>, String) onAddToCart;
+  // NEW: shop-level open/closed flag, passed down from
+  // _ShopProductsScreenState._isShopOpenNow. When false, the Add button
+  // becomes disabled (same visual treatment as out-of-stock), but the
+  // product itself stays fully visible/browsable.
+  final bool isShopOpen;
 
-  const _ProductCard({required this.doc, required this.onAddToCart});
+  const _ProductCard({
+    required this.doc,
+    required this.onAddToCart,
+    this.isShopOpen = true,
+  });
 
   @override
   State<_ProductCard> createState() => _ProductCardState();
@@ -960,6 +1239,11 @@ class _ProductCardState extends State<_ProductCard> {
     final imageUrl    = data['image_url'] as String?;
     final description = data['description'] as String?;
     final bool isOutOfStock = data['out_of_stock'] == true;
+    // Button is disabled if the product is out of stock OR the shop is
+    // currently closed/suspended. Out-of-stock keeps priority in the
+    // label below since that's the more specific reason.
+    final bool isShopClosed = !widget.isShopOpen;
+    final bool isAddDisabled = isOutOfStock || isShopClosed;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -1055,7 +1339,7 @@ class _ProductCardState extends State<_ProductCard> {
                       ),
                       const Spacer(),
                       GestureDetector(
-                        onTap: (isOutOfStock || _adding)
+                        onTap: (isAddDisabled || _adding)
                             ? null
                             : () async {
                                 setState(() => _adding = true);
@@ -1066,7 +1350,7 @@ class _ProductCardState extends State<_ProductCard> {
                           duration: const Duration(milliseconds: 200),
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
                           decoration: BoxDecoration(
-                            color: isOutOfStock
+                            color: isAddDisabled
                                 ? NearBuyColors.textHint.withOpacity(0.3)
                                 : (_adding
                                     ? NearBuyColors.navy.withOpacity(0.7)
@@ -1085,21 +1369,33 @@ class _ProductCardState extends State<_ProductCard> {
                                             fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white70)),
                                   ],
                                 )
-                              : (_adding
-                                  ? const SizedBox(
-                                      width: 14, height: 14,
-                                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                                  : Row(
+                              : (isShopClosed
+                                  ? Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        const Icon(Icons.add_shopping_cart_rounded,
-                                            size: 13, color: Colors.white),
+                                        const Icon(Icons.storefront_outlined,
+                                            size: 13, color: Colors.white70),
                                         const SizedBox(width: 4),
-                                        Text('Add',
+                                        Text('Shop Closed',
                                             style: GoogleFonts.poppins(
-                                                fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white)),
+                                                fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white70)),
                                       ],
-                                    )),
+                                    )
+                                  : (_adding
+                                      ? const SizedBox(
+                                          width: 14, height: 14,
+                                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                      : Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const Icon(Icons.add_shopping_cart_rounded,
+                                                size: 13, color: Colors.white),
+                                            const SizedBox(width: 4),
+                                            Text('Add',
+                                                style: GoogleFonts.poppins(
+                                                    fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white)),
+                                          ],
+                                        ))),
                         ),
                       ),
                     ],
@@ -1121,12 +1417,12 @@ class _ReviewCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final data    = doc.data() as Map<String, dynamic>;
-    final name    = data['name']    ?? 'User';
-    final rating  = (data['rating'] ?? 0).toDouble();
-    final comment = data['comment'] ?? '';
-    final ts      = data['createdAt'];
-    final date    = ts != null ? (ts as dynamic).toDate() : null;
+    final data       = doc.data() as Map<String, dynamic>;
+    final name       = _getUserName(data);
+    final rating     = _parseRating(data['rating']);
+    final comment    = _getComment(data);
+    final profilePic = _getProfilePic(data);
+    final date       = _getReviewDate(data);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -1144,9 +1440,12 @@ class _ReviewCard extends StatelessWidget {
               CircleAvatar(
                 radius: 18,
                 backgroundColor: NearBuyColors.navy.withOpacity(0.08),
-                child: Text(name[0].toUpperCase(), style: GoogleFonts.poppins(
-                  fontWeight: FontWeight.w700, color: NearBuyColors.navy, fontSize: 14,
-                )),
+                backgroundImage: profilePic != null ? NetworkImage(profilePic) : null,
+                child: profilePic == null
+                    ? Text(name[0].toUpperCase(), style: GoogleFonts.poppins(
+                        fontWeight: FontWeight.w700, color: NearBuyColors.navy, fontSize: 14,
+                      ))
+                    : null,
               ),
               const SizedBox(width: 10),
               Expanded(

@@ -33,6 +33,14 @@ class _LoginScreenState extends State<LoginScreen>
   // Admin credentials (unchanged)
   final String mainAdminUID   = "sYf4uOsCnBhbZ6khzF4y21Ii0W13";
   final String mainAdminEmail = "nearbuyadmin@gmail.com";
+
+  // ✅ NEW — validation constants & helpers (added, nothing existing removed)
+  static const int _emailMaxLength    = 50;
+  static const int _passwordMaxLength = 30;
+  static final RegExp _emailRegex =
+      RegExp(r'^[\w\.\-]+@[\w\-]+\.[a-zA-Z]{2,}$');
+
+  bool _isValidEmail(String email) => _emailRegex.hasMatch(email);
  
   @override
   void initState() {
@@ -56,11 +64,23 @@ class _LoginScreenState extends State<LoginScreen>
   }
  
   // ✅ LOGIN LOGIC unchanged — role from Firestore
+  // ✅ Only addition: proper email-format and password-length validation
+  // before the existing Firebase sign-in flow runs. No existing logic altered.
   Future<void> _loginUser() async {
     final email    = _emailController.text.trim();
     final password = _passwordController.text.trim();
     if (email.isEmpty || password.isEmpty) {
       _showSnack('Please enter email and password.', Colors.red);
+      return;
+    }
+    // ✅ NEW — proper email format validation
+    if (!_isValidEmail(email)) {
+      _showSnack('Please enter a valid email address.', Colors.red);
+      return;
+    }
+    // ✅ NEW — minimum password length guard (Firebase itself requires >=6)
+    if (password.length < 6) {
+      _showSnack('Password must be at least 6 characters.', Colors.red);
       return;
     }
     setState(() => _isLoading = true);
@@ -207,15 +227,22 @@ class _LoginScreenState extends State<LoginScreen>
                       _buildField(
                         controller: _emailController,
                         label: 'Phone number or email',
-                        hint: 'Enter email or phone',
+                        hint: 'Enter Email',
                         icon: Icons.person_outline,
                         keyboardType: TextInputType.emailAddress,
+                        maxLength: _emailMaxLength, // ✅ NEW — length limit
                       ),
                       const SizedBox(height: 14),
                       // Password field
                       TextField(
                         controller: _passwordController,
                         obscureText: _obscureText,
+                        maxLength: _passwordMaxLength, // ✅ NEW — length limit
+                        buildCounter: (context,
+                                {required currentLength,
+                                required isFocused,
+                                maxLength}) =>
+                            null, // ✅ NEW — hides the default counter text
                         decoration: InputDecoration(
                           hintText: 'Password',
                           hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
@@ -223,8 +250,8 @@ class _LoginScreenState extends State<LoginScreen>
                               color: Color(0xFF64748B)),
                           suffixIcon: IconButton(
                             icon: Icon(
-                              _obscureText ? Icons.visibility_outlined
-                                          : Icons.visibility_off_outlined,
+                              _obscureText ? Icons.visibility_off_outlined
+                                          : Icons.visibility_outlined,
                               color: Colors.grey,
                             ),
                             onPressed: () => setState(() => _obscureText = !_obscureText),
@@ -316,10 +343,15 @@ class _LoginScreenState extends State<LoginScreen>
     required String hint,
     required IconData icon,
     TextInputType keyboardType = TextInputType.text,
+    int? maxLength, // ✅ NEW — optional length limit param
   }) {
     return TextField(
       controller: controller,
       keyboardType: keyboardType,
+      maxLength: maxLength, // ✅ NEW
+      buildCounter: (context,
+              {required currentLength, required isFocused, maxLength}) =>
+          null, // ✅ NEW — hides the default counter text
       decoration: InputDecoration(
         hintText: hint,
         hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),

@@ -12,12 +12,18 @@ class OrderConfirmationScreen extends StatefulWidget {
   final String orderId;
   final String shopName;
   final double totalAmount;
+  final String deliveryAddress;
+  final double deliveryCharge;
+  final double? deliveryDistanceKm;
 
   const OrderConfirmationScreen({
     super.key,
     required this.orderId,
     required this.shopName,
     required this.totalAmount,
+    required this.deliveryAddress,
+    required this.deliveryCharge,
+    this.deliveryDistanceKm,
   });
 
   @override
@@ -48,6 +54,12 @@ class _OrderConfirmationScreenState extends State<OrderConfirmationScreen>
   @override
   Widget build(BuildContext context) {
     final shortId = '#${widget.orderId.substring(0, 10).toUpperCase()}';
+    final addressText = widget.deliveryAddress.trim().isEmpty
+        ? 'Not provided'
+        : widget.deliveryAddress.trim();
+    final distanceText = widget.deliveryDistanceKm != null
+        ? '${widget.deliveryDistanceKm!.toStringAsFixed(1)} km'
+        : 'Fixed rate (manual address)';
 
     return Scaffold(
       backgroundColor: NearBuyColors.cream,
@@ -118,6 +130,15 @@ class _OrderConfirmationScreenState extends State<OrderConfirmationScreen>
                       _detailRow(Icons.receipt_long_rounded, 'Order ID', shortId),
                       _divider(),
                       _detailRow(Icons.storefront_rounded, 'Shop', widget.shopName),
+                      _divider(),
+                      _detailRow(Icons.location_on_rounded, 'Delivery Address', addressText),
+                      _divider(),
+                      _detailRow(Icons.social_distance_rounded, 'Delivery Distance', distanceText),
+                      _divider(),
+                      _detailRow(
+                        Icons.local_shipping_outlined, 'Delivery Charges',
+                        'Rs. ${widget.deliveryCharge.toStringAsFixed(0)}',
+                      ),
                       _divider(),
                       _detailRow(
                         Icons.currency_rupee_rounded, 'Total Amount',
@@ -213,9 +234,14 @@ class _OrderConfirmationScreenState extends State<OrderConfirmationScreen>
     );
   }
 
+  // Made responsive: label + value now wrap in Flexible/Expanded so a long
+  // delivery address can't overflow the row. Layout falls back to a
+  // right-aligned, multi-line value instead of forcing everything onto
+  // one line.
   Widget _detailRow(IconData icon, String label, String value,
       {Color? valueColor, bool valueBold = false}) {
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
           padding: const EdgeInsets.all(7),
@@ -226,14 +252,25 @@ class _OrderConfirmationScreenState extends State<OrderConfirmationScreen>
           child: Icon(icon, size: 15, color: NearBuyColors.navy),
         ),
         const SizedBox(width: 12),
-        Expanded(child: Text(label, style: GoogleFonts.poppins(
-          fontSize: 13, color: NearBuyColors.textSecondary,
-        ))),
-        Text(value, style: GoogleFonts.poppins(
-          fontSize: 13,
-          fontWeight: valueBold ? FontWeight.w800 : FontWeight.w600,
-          color: valueColor ?? NearBuyColors.textPrimary,
-        )),
+        Expanded(
+          flex: 2,
+          child: Text(label, style: GoogleFonts.poppins(
+            fontSize: 13, color: NearBuyColors.textSecondary,
+          )),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          flex: 3,
+          child: Text(
+            value,
+            textAlign: TextAlign.right,
+            style: GoogleFonts.poppins(
+              fontSize: 13,
+              fontWeight: valueBold ? FontWeight.w800 : FontWeight.w600,
+              color: valueColor ?? NearBuyColors.textPrimary,
+            ),
+          ),
+        ),
       ],
     );
   }
