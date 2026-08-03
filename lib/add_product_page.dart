@@ -21,6 +21,8 @@ class _NB {
   static const Color red       = Color(0xFFE53935);
   static const Color redBg     = Color(0xFFFFECEC);
   static const Color orangeBg  = Color(0xFFFFF0E8);
+  static const Color yellow    = Color(0xFFF5A623);
+  static const Color yellowBg  = Color(0xFFFFFBE8);
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -49,15 +51,18 @@ class _AddProductPageState extends State<AddProductPage>
   final _nameController  = TextEditingController();
   final _descController  = TextEditingController();
   final _priceController = TextEditingController();
+  final _quantityController = TextEditingController();
   bool    _loading       = false;
   File?   _productImage;
   String? _imageUrl;
-  bool    _outOfStock    = false;
-
-  // FIX: Track whether save was attempted (to show image error border)
   bool    _imageMissing  = false;
-
   final   picker         = ImagePicker();
+  
+  // ── New controllers for tracking ──
+  final _nameFocusNode = FocusNode();
+  final _descFocusNode = FocusNode();
+  final _priceFocusNode = FocusNode();
+  final _quantityFocusNode = FocusNode();
 
   // ── Cloudinary credentials ────────────────────────
   static const String _cloudName    = 'dxzaqavfj';
@@ -76,8 +81,8 @@ class _AddProductPageState extends State<AddProductPage>
       _nameController.text  = widget.editData!['name']        ?? '';
       _descController.text  = widget.editData!['description'] ?? '';
       _priceController.text = (widget.editData!['price'] ?? '').toString();
+      _quantityController.text = (widget.editData!['quantity'] ?? 0).toString();
       _imageUrl             = widget.editData!['image_url'];
-      _outOfStock           = widget.editData!['out_of_stock'] == true;
     }
     _animController = AnimationController(
       vsync: this,
@@ -89,6 +94,10 @@ class _AddProductPageState extends State<AddProductPage>
       begin: const Offset(0, 0.06), end: Offset.zero,
     ).animate(CurvedAnimation(parent: _animController, curve: Curves.easeOut));
     _animController.forward();
+    
+    // Add listeners for character counting
+    _nameController.addListener(() => setState(() {}));
+    _descController.addListener(() => setState(() {}));
   }
 
   @override
@@ -97,6 +106,11 @@ class _AddProductPageState extends State<AddProductPage>
     _nameController.dispose();
     _descController.dispose();
     _priceController.dispose();
+    _quantityController.dispose();
+    _nameFocusNode.dispose();
+    _descFocusNode.dispose();
+    _priceFocusNode.dispose();
+    _quantityFocusNode.dispose();
     super.dispose();
   }
 
@@ -104,107 +118,295 @@ class _AddProductPageState extends State<AddProductPage>
   // LOGIC
   // ══════════════════════════════════════════════════
 
-  Future<void> pickImage() async {
-    final picked = await picker.pickImage(source: ImageSource.gallery);
-    if (picked != null) {
-      setState(() {
-        _productImage = File(picked.path);
-        _imageMissing = false; // clear error once image is picked
-      });
+  // ── Image Picker with Camera & Gallery ──
+  Future<void> _pickImage(ImageSource source) async {
+    try {
+      final XFile? picked = await picker.pickImage(
+        source: source,
+        maxWidth: 1920,
+        maxHeight: 1920,
+        imageQuality: 85,
+      );
+      
+      if (picked != null) {
+        // Validate image size (max 10MB)
+        final File imageFile = File(picked.path);
+        final int fileSize = await imageFile.length();
+        if (fileSize > 10 * 1024 * 1024) {
+          _showSnack('Image size should be less than 10MB', _NB.red);
+          return;
+        }
+        
+        setState(() {
+          _productImage = imageFile;
+          _imageMissing = false;
+        });
+      }
+    } catch (e) {
+      _showSnack('Error picking image: $e', _NB.red);
     }
+  }
+
+  // ── Show Image Picker Modal ──
+  void _showImagePickerModal() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.symmetric(vertical: 12),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  _imagePickerOption(
+                    icon: Icons.photo_camera,
+                    label: 'Camera',
+                    color: _NB.navy,
+                    onTap: () {
+                      Navigator.pop(context);
+                      _pickImage(ImageSource.camera);
+                    },
+                  ),
+                  _imagePickerOption(
+                    icon: Icons.photo_library,
+                    label: 'Gallery',
+                    color: _NB.orange,
+                    onTap: () {
+                      Navigator.pop(context);
+                      _pickImage(ImageSource.gallery);
+                    },
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _imagePickerOption({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 16),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: color.withOpacity(0.2)),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: color, size: 32),
+            const SizedBox(height: 8),
+            Text(label,
+                style: TextStyle(
+                  color: color,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14,
+                )),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<String?> uploadToCloudinary(File image) async {
-    final url     = Uri.parse(
-        'https://api.cloudinary.com/v1_1/$_cloudName/image/upload');
-    final request = http.MultipartRequest('POST', url);
-    request.fields['upload_preset'] = _uploadPreset;
-    request.files.add(
-      await http.MultipartFile.fromPath('file', image.path),
-    );
-    final response = await request.send();
-    final res      = await http.Response.fromStream(response);
-    if (response.statusCode == 200) {
-      final data = json.decode(res.body);
-      return data['secure_url'];
+    try {
+      final url = Uri.parse('https://api.cloudinary.com/v1_1/$_cloudName/image/upload');
+      final request = http.MultipartRequest('POST', url);
+      request.fields['upload_preset'] = _uploadPreset;
+      request.files.add(
+        await http.MultipartFile.fromPath('file', image.path),
+      );
+      final response = await request.send();
+      final res = await http.Response.fromStream(response);
+      if (response.statusCode == 200) {
+        final data = json.decode(res.body);
+        return data['secure_url'];
+      }
+      return null;
+    } catch (e) {
+      _showSnack('Upload failed: $e', _NB.red);
+      return null;
     }
-    return null;
   }
 
-  // FIX: Image is now mandatory in BOTH add and edit mode
+  // ── Validation ──
   bool _validate() {
-    if (_nameController.text.trim().isEmpty) {
-      _showSnack('Product name is required', _NB.red);
-      return false;
-    }
-    if (_priceController.text.trim().isEmpty) {
-      _showSnack('Price is required', _NB.red);
-      return false;
-    }
-    final price = double.tryParse(_priceController.text.trim());
-    if (price == null || price <= 0) {
-      _showSnack('Enter a valid price greater than 0', _NB.red);
-      return false;
-    }
-
-    // FIX: Image required for BOTH new product and edit mode
+    // 1. Image validation
     final bool hasImage = _productImage != null ||
         (_imageUrl != null && _imageUrl!.isNotEmpty);
     if (!hasImage) {
-      setState(() => _imageMissing = true); // show red border on picker
+      setState(() => _imageMissing = true);
       _showSnack('Product image is required', _NB.red);
+      return false;
+    }
+
+    // 2. Product name validation
+    final String name = _nameController.text.trim();
+    if (name.isEmpty) {
+      _showSnack('Product name is required', _NB.red);
+      return false;
+    }
+    if (name.length < 2) {
+      _showSnack('Product name must be at least 2 characters', _NB.red);
+      return false;
+    }
+    if (name.length > 50) {
+      _showSnack('Product name cannot exceed 50 characters', _NB.red);
+      return false;
+    }
+    // Validate only reasonable characters
+    final RegExp validNameRegex = RegExp(r'^[a-zA-Z0-9\s\-\.\(\)&]+$');
+    if (!validNameRegex.hasMatch(name)) {
+      _showSnack('Product name contains invalid characters', _NB.red);
+      return false;
+    }
+
+    // 3. Description validation (optional but length check if entered)
+    final String desc = _descController.text.trim();
+    if (desc.isNotEmpty && desc.length > 200) {
+      _showSnack('Description cannot exceed 200 characters', _NB.red);
+      return false;
+    }
+
+    // 4. Category validation - you already have category selection
+    // (Assuming you have category dropdown - will add in UI)
+
+    // 5. Quantity validation
+    final String qtyText = _quantityController.text.trim();
+    if (qtyText.isEmpty) {
+      _showSnack('Quantity is required', _NB.red);
+      return false;
+    }
+    final int? quantity = int.tryParse(qtyText);
+    if (quantity == null) {
+      _showSnack('Please enter a valid whole number for quantity', _NB.red);
+      return false;
+    }
+    if (quantity < 0) {
+      _showSnack('Quantity cannot be negative', _NB.red);
+      return false;
+    }
+    if (quantity > 9999) {
+      _showSnack('Maximum quantity is 9999', _NB.red);
+      return false;
+    }
+
+    // 6. Price validation
+    final String priceText = _priceController.text.trim();
+    if (priceText.isEmpty) {
+      _showSnack('Price is required', _NB.red);
+      return false;
+    }
+    final double? price = double.tryParse(priceText);
+    if (price == null || price < 0) {
+      _showSnack('Please enter a valid price', _NB.red);
+      return false;
+    }
+    if (price > 9999999.99) {
+      _showSnack('Maximum price is 99,99,999.99', _NB.red);
       return false;
     }
 
     return true;
   }
 
+  // ── Save Product ──
   void _saveProduct() async {
     if (!_validate()) return;
 
     setState(() => _loading = true);
 
-    if (_productImage != null) {
-      final uploadedUrl = await uploadToCloudinary(_productImage!);
-      if (uploadedUrl != null) _imageUrl = uploadedUrl;
-    }
+    try {
+      // Upload image if new image selected
+      if (_productImage != null) {
+        final uploadedUrl = await uploadToCloudinary(_productImage!);
+        if (uploadedUrl != null) {
+          _imageUrl = uploadedUrl;
+        } else {
+          setState(() => _loading = false);
+          _showSnack('Failed to upload image', _NB.red);
+          return;
+        }
+      }
 
-    final data = {
-      'name':        _nameController.text.trim(),
-      'description': _descController.text.trim(),
-      'price':       double.tryParse(_priceController.text.trim()) ?? 0.0,
-      'image_url':   _imageUrl,
-      'out_of_stock': _outOfStock,
-      'created_at':  Timestamp.now(),
-    };
+      // ── Get quantity and auto-calculate stock status ──
+      final int quantity = int.tryParse(_quantityController.text.trim()) ?? 0;
+      final bool isOutOfStock = quantity <= 0;
 
-    final collection = FirebaseFirestore.instance
-        .collection('shops')
-        .doc(widget.shopId)
-        .collection('products');
+      // ── Prepare data with existing field names ──
+      final Map<String, dynamic> data = {
+        'name': _nameController.text.trim(),
+        'description': _descController.text.trim(),
+        'price': double.tryParse(_priceController.text.trim()) ?? 0.0,
+        'quantity': quantity,
+        'out_of_stock': isOutOfStock,  // Auto-calculated from quantity
+        'image_url': _imageUrl,
+        'updated_at': Timestamp.now(),
+      };
 
-    if (widget.editProductId != null) {
-      await collection.doc(widget.editProductId).update(data);
-      if (mounted) _showSnack('Product updated successfully!', _NB.green);
-    } else {
-      await collection.add(data);
-      if (mounted) _showSnack('Product added successfully!', _NB.orange);
-    }
+      // Add created_at only for new products
+      if (widget.editProductId == null) {
+        data['created_at'] = Timestamp.now();
+        data['shopId'] = widget.shopId;
+      }
 
-    setState(() {
-      _loading      = false;
-      _productImage = null;
-      _outOfStock   = false;
-      _imageMissing = false;
-    });
+      final collection = FirebaseFirestore.instance
+          .collection('shops')
+          .doc(widget.shopId)
+          .collection('products');
 
-    if (widget.editProductId == null) {
-      _nameController.clear();
-      _descController.clear();
-      _priceController.clear();
-      setState(() => _imageUrl = null);
-    } else {
-      if (mounted) Navigator.pop(context);
+      if (widget.editProductId != null) {
+        // Update existing product - only changed fields
+        await collection.doc(widget.editProductId).update(data);
+        if (mounted) {
+          _showSnack('Product updated successfully!', _NB.green);
+          Navigator.pop(context, true);
+        }
+      } else {
+        // Add new product
+        await collection.add(data);
+        if (mounted) {
+          _showSnack('Product added successfully!', _NB.orange);
+          // Clear form for new product
+          _nameController.clear();
+          _descController.clear();
+          _priceController.clear();
+          _quantityController.clear();
+          setState(() {
+            _productImage = null;
+            _imageUrl = null;
+            _imageMissing = false;
+          });
+        }
+      }
+    } catch (e) {
+      _showSnack('Error saving product: $e', _NB.red);
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -213,14 +415,15 @@ class _AddProductPageState extends State<AddProductPage>
       context: context,
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20)),
+          borderRadius: BorderRadius.circular(20),
+        ),
         titlePadding: EdgeInsets.zero,
         title: Container(
           padding: const EdgeInsets.all(20),
           decoration: const BoxDecoration(
             color: _NB.navy,
             borderRadius: BorderRadius.only(
-              topLeft:  Radius.circular(20),
+              topLeft: Radius.circular(20),
               topRight: Radius.circular(20),
             ),
           ),
@@ -261,25 +464,35 @@ class _AddProductPageState extends State<AddProductPage>
               backgroundColor: Colors.red.shade600,
               elevation: 0,
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10)),
+                borderRadius: BorderRadius.circular(10),
+              ),
               padding: const EdgeInsets.symmetric(
-                  horizontal: 20, vertical: 10),
+                horizontal: 20, vertical: 10,
+              ),
             ),
             onPressed: () => Navigator.pop(context, true),
             child: const Text('Delete',
                 style: TextStyle(
-                    color: Colors.white, fontWeight: FontWeight.bold)),
+                  color: Colors.white, fontWeight: FontWeight.bold,
+                )),
           ),
         ],
       ),
     );
     if (confirm == true) {
-      await FirebaseFirestore.instance
-          .collection('shops')
-          .doc(widget.shopId)
-          .collection('products')
-          .doc(productId)
-          .delete();
+      try {
+        await FirebaseFirestore.instance
+            .collection('shops')
+            .doc(widget.shopId)
+            .collection('products')
+            .doc(productId)
+            .delete();
+        if (mounted) {
+          _showSnack('Product deleted successfully', _NB.green);
+        }
+      } catch (e) {
+        _showSnack('Error deleting product: $e', _NB.red);
+      }
     }
   }
 
@@ -297,26 +510,33 @@ class _AddProductPageState extends State<AddProductPage>
       backgroundColor: color,
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12)),
+        borderRadius: BorderRadius.circular(12),
+      ),
       margin: const EdgeInsets.all(16),
     ));
   }
 
   InputDecoration _inputDec({
-    required String   label,
-    required IconData icon,
+    required String label,
+    IconData? icon,
+    Widget? prefixWidget,
     String? hint,
+    Widget? suffix,
   }) {
     return InputDecoration(
-      labelText:          label,
-      hintText:           hint,
-      prefixIcon:         Icon(icon, color: _NB.orange, size: 20),
+      labelText: label,
+      hintText: hint,
+      prefixIcon: prefixWidget ??
+          Icon(icon, color: _NB.orange, size: 20),
+      suffix: suffix,
       floatingLabelStyle: const TextStyle(
-          color: _NB.navy, fontWeight: FontWeight.w600),
-      filled:             true,
-      fillColor:          _NB.bg,
-      contentPadding:     const EdgeInsets.symmetric(
-          horizontal: 16, vertical: 14),
+        color: _NB.navy, fontWeight: FontWeight.w600,
+      ),
+      filled: true,
+      fillColor: _NB.bg,
+      contentPadding: const EdgeInsets.symmetric(
+        horizontal: 16, vertical: 14,
+      ),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
         borderSide: const BorderSide(color: _NB.border),
@@ -363,14 +583,12 @@ class _AddProductPageState extends State<AddProductPage>
 
   // ══════════════════════════════════════════════════
   // IMAGE PICKER WIDGET
-  // FIX: Red border + error text shown when _imageMissing is true
-  // FIX: Hint text updated — image required in both add and edit mode
   // ══════════════════════════════════════════════════
 
   Widget _imagePicker() {
-    final hasImage = _productImage != null || (_imageUrl != null && _imageUrl!.isNotEmpty);
+    final hasImage = _productImage != null || 
+                    (_imageUrl != null && _imageUrl!.isNotEmpty);
 
-    // Border color: red if missing after save attempt, orange if has image, grey otherwise
     final Color borderColor = _imageMissing
         ? _NB.red
         : hasImage
@@ -378,109 +596,123 @@ class _AddProductPageState extends State<AddProductPage>
             : _NB.border;
     final double borderWidth = (_imageMissing || hasImage) ? 2.0 : 1.0;
 
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      GestureDetector(
-        onTap: pickImage,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 250),
-          height: 180,
-          width: double.infinity,
-          decoration: BoxDecoration(
-            color: hasImage ? Colors.transparent : _NB.bg,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: borderColor, width: borderWidth),
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(15),
-            child: _productImage != null
-                ? Stack(fit: StackFit.expand, children: [
-                    Image.file(_productImage!, fit: BoxFit.cover),
-                    Positioned(
-                      bottom: 0, left: 0, right: 0,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        color: Colors.black.withOpacity(0.45),
-                        child: const Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.edit, color: Colors.white, size: 16),
-                            SizedBox(width: 6),
-                            Text('Tap to change image',
-                                style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w500)),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ])
-                : _imageUrl != null && _imageUrl!.isNotEmpty
-                    ? Stack(fit: StackFit.expand, children: [
-                        Image.network(
-                          _imageUrl!,
-                          fit: BoxFit.cover,
-                          loadingBuilder: (_, child, progress) =>
-                              progress == null
-                                  ? child
-                                  : const Center(
-                                      child: CircularProgressIndicator(
-                                          color: _NB.orange)),
-                          errorBuilder: (_, __, ___) => _imagePlaceholder(),
-                        ),
-                        Positioned(
-                          bottom: 0, left: 0, right: 0,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            color: Colors.black.withOpacity(0.45),
-                            child: const Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.edit, color: Colors.white, size: 16),
-                                SizedBox(width: 6),
-                                Text('Tap to change image',
-                                    style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w500)),
-                              ],
-                            ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // ── Image Preview ──
+        GestureDetector(
+          onTap: _showImagePickerModal,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 250),
+            height: 180,
+            width: double.infinity,
+            decoration: BoxDecoration(
+              color: hasImage ? Colors.transparent : _NB.bg,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: borderColor, width: borderWidth),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(15),
+              child: _productImage != null
+                  ? Stack(fit: StackFit.expand, children: [
+                      Image.file(_productImage!, fit: BoxFit.cover),
+                      Positioned(
+                        bottom: 0, left: 0, right: 0,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          color: Colors.black.withOpacity(0.45),
+                          child: const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.edit, color: Colors.white, size: 16),
+                              SizedBox(width: 6),
+                              Text('Tap to change image',
+                                  style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w500)),
+                            ],
                           ),
                         ),
-                      ])
-                    : _imagePlaceholder(showError: _imageMissing),
+                      ),
+                    ])
+                  : _imageUrl != null && _imageUrl!.isNotEmpty
+                      ? Stack(fit: StackFit.expand, children: [
+                          Image.network(
+                            _imageUrl!,
+                            fit: BoxFit.cover,
+                            loadingBuilder: (_, child, progress) =>
+                                progress == null
+                                    ? child
+                                    : const Center(
+                                        child: CircularProgressIndicator(
+                                          color: _NB.orange,
+                                        )),
+                            errorBuilder: (_, __, ___) => _imagePlaceholder(),
+                          ),
+                          Positioned(
+                            bottom: 0, left: 0, right: 0,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              color: Colors.black.withOpacity(0.45),
+                              child: const Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.edit, color: Colors.white, size: 16),
+                                  SizedBox(width: 6),
+                                  Text('Tap to change image',
+                                      style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w500)),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ])
+                      : _imagePlaceholder(showError: _imageMissing),
+            ),
           ),
         ),
-      ),
-
-      // FIX: Error message shown in red when image is missing after save attempt
-      if (_imageMissing)
+        
+        // ── Image Instructions ──
         Padding(
-          padding: const EdgeInsets.only(top: 6, left: 4),
-          child: Row(children: [
-            const Icon(Icons.error_outline, size: 13, color: _NB.red),
-            const SizedBox(width: 4),
-            const Text('Product image is required',
-                style: TextStyle(
+          padding: const EdgeInsets.only(top: 8, left: 4),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.info_outline, 
+                   size: 14, color: _imageMissing ? _NB.red : _NB.textGrey),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'Use a clear and real photo of the product. Avoid blurry, dark, or unrelated images. Make sure the complete product is visible.',
+                  style: TextStyle(
                     fontSize: 11,
-                    color: _NB.red,
-                    fontWeight: FontWeight.w500)),
-          ]),
-        )
-      else
-        // Normal hint — image required in both modes
-        Padding(
-          padding: const EdgeInsets.only(top: 6, left: 4),
-          child: Row(children: [
-            Icon(Icons.info_outline,
-                size: 12, color: Colors.grey.shade400),
-            const SizedBox(width: 4),
-            Text('Image is required to save the product',
-                style: TextStyle(
-                    fontSize: 11, color: Colors.grey.shade400)),
-          ]),
+                    color: _imageMissing ? _NB.red : _NB.textGrey,
+                    height: 1.4,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
-    ]);
+        
+        if (_imageMissing)
+          Padding(
+            padding: const EdgeInsets.only(top: 4, left: 4),
+            child: Row(children: [
+              const Icon(Icons.error_outline, size: 13, color: _NB.red),
+              const SizedBox(width: 4),
+              const Text('Product image is required',
+                  style: TextStyle(
+                      fontSize: 11,
+                      color: _NB.red,
+                      fontWeight: FontWeight.w500)),
+            ]),
+          ),
+      ],
+    );
   }
 
   Widget _imagePlaceholder({bool showError = false}) {
@@ -496,9 +728,7 @@ class _AddProductPageState extends State<AddProductPage>
             shape: BoxShape.circle,
           ),
           child: Icon(
-            showError
-                ? Icons.add_photo_alternate_outlined
-                : Icons.add_photo_alternate_outlined,
+            showError ? Icons.error_outline : Icons.add_photo_alternate_outlined,
             color: showError ? _NB.red : _NB.orange,
             size: 34,
           ),
@@ -507,106 +737,39 @@ class _AddProductPageState extends State<AddProductPage>
         Text(
           showError ? 'Image is required — Tap to add' : 'Tap to add product image',
           style: TextStyle(
-              color: showError ? _NB.red : _NB.textGrey,
-              fontSize: 13,
-              fontWeight: FontWeight.w500),
+            color: showError ? _NB.red : _NB.textGrey,
+            fontSize: 13,
+            fontWeight: FontWeight.w500,
+          ),
         ),
         const SizedBox(height: 4),
-        const Text('JPG, PNG supported',
-            style: TextStyle(color: _NB.textGrey, fontSize: 11)),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Text('JPG, PNG supported',
+                style: TextStyle(color: _NB.textGrey, fontSize: 11)),
+            const SizedBox(width: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: _NB.orangeBg,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: const Text('Max 10MB',
+                  style: TextStyle(
+                    color: _NB.orange,
+                    fontSize: 9,
+                    fontWeight: FontWeight.w600,
+                  )),
+            ),
+          ],
+        ),
       ],
     );
   }
 
   // ══════════════════════════════════════════════════
-  // OUT OF STOCK TOGGLE (edit mode)
-  // ══════════════════════════════════════════════════
-
-  Widget _outOfStockToggle() {
-    return GestureDetector(
-      onTap: () => setState(() => _outOfStock = !_outOfStock),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding:
-            const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        decoration: BoxDecoration(
-          color: _outOfStock ? _NB.redBg : _NB.greenBg,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-              color: _outOfStock
-                  ? _NB.red.withOpacity(0.3)
-                  : _NB.green.withOpacity(0.3)),
-        ),
-        child: Row(children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-                color: _outOfStock
-                    ? _NB.red.withOpacity(0.12)
-                    : _NB.green.withOpacity(0.12),
-                borderRadius: BorderRadius.circular(10)),
-            child: Icon(
-              _outOfStock
-                  ? Icons.inventory_2_outlined
-                  : Icons.check_circle_outline,
-              color: _outOfStock ? _NB.red : _NB.green,
-              size: 20,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-              Text(
-                _outOfStock ? 'Out of Stock' : 'In Stock',
-                style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
-                    color: _outOfStock ? _NB.red : _NB.green),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                _outOfStock
-                    ? 'Tap to mark as In Stock'
-                    : 'Tap to mark as Out of Stock',
-                style: TextStyle(
-                    fontSize: 11,
-                    color: _outOfStock
-                        ? _NB.red.withOpacity(0.7)
-                        : _NB.green.withOpacity(0.7)),
-              ),
-            ]),
-          ),
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            width: 44,
-            height: 24,
-            decoration: BoxDecoration(
-              color: _outOfStock ? _NB.red : _NB.green,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Stack(children: [
-              AnimatedPositioned(
-                duration: const Duration(milliseconds: 200),
-                left: _outOfStock ? 22 : 2,
-                top: 2,
-                child: Container(
-                  width: 20,
-                  height: 20,
-                  decoration: const BoxDecoration(
-                      color: Colors.white, shape: BoxShape.circle),
-                ),
-              ),
-            ]),
-          ),
-        ]),
-      ),
-    );
-  }
-
-  // ══════════════════════════════════════════════════
-  // PRODUCT LIST (with out-of-stock badge + edit/delete)
+  // PRODUCT LIST
   // ══════════════════════════════════════════════════
 
   Widget _productList() {
@@ -618,7 +781,7 @@ class _AddProductPageState extends State<AddProductPage>
           .orderBy('created_at', descending: true)
           .snapshots(),
       builder: (context, snapshot) {
-        if (!snapshot.hasData) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(
             child: Padding(
               padding: EdgeInsets.all(24),
@@ -626,8 +789,8 @@ class _AddProductPageState extends State<AddProductPage>
             ),
           );
         }
-        final products = snapshot.data!.docs;
-        if (products.isEmpty) {
+        
+        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
           return Container(
             padding: const EdgeInsets.symmetric(vertical: 32),
             child: Column(children: [
@@ -640,14 +803,20 @@ class _AddProductPageState extends State<AddProductPage>
             ]),
           );
         }
+        
+        final products = snapshot.data!.docs;
         return ListView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           itemCount: products.length,
           itemBuilder: (context, index) {
-            final data      = products[index].data() as Map<String, dynamic>;
+            final data = products[index].data() as Map<String, dynamic>;
             final productId = products[index].id;
-            final bool isOutOfStock = data['out_of_stock'] == true;
+            
+            // ── Determine stock status from quantity ──
+            final int quantity = data['quantity'] ?? 0;
+            final bool isOutOfStock = quantity <= 0;
+            final bool isLowStock = quantity > 0 && quantity <= 5;
 
             return Opacity(
               opacity: isOutOfStock ? 0.7 : 1.0,
@@ -659,7 +828,9 @@ class _AddProductPageState extends State<AddProductPage>
                   border: Border.all(
                     color: isOutOfStock
                         ? _NB.red.withOpacity(0.25)
-                        : _NB.border,
+                        : isLowStock
+                            ? _NB.yellow.withOpacity(0.4)
+                            : _NB.border,
                   ),
                   boxShadow: [
                     BoxShadow(
@@ -704,78 +875,122 @@ class _AddProductPageState extends State<AddProductPage>
                             ),
                           ),
                         ),
+                      if (isLowStock && !isOutOfStock)
+                        Positioned(
+                          top: 2,
+                          right: 2,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 4, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: _NB.yellow,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: const Text('LOW',
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 6,
+                                    fontWeight: FontWeight.bold)),
+                          ),
+                        ),
                     ]),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                        Text(
-                          data['name'] ?? '',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                            color: isOutOfStock
-                                ? Colors.grey.shade500
-                                : _NB.navy,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 4),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: isOutOfStock
-                                ? Colors.grey.shade100
-                                : _NB.orangeBg,
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            'Rs. ${data['price']}',
-                            style: TextStyle(
-                              color: isOutOfStock
-                                  ? Colors.grey.shade400
-                                  : _NB.orange,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ),
-                        if (data['description'] != null &&
-                            data['description']
-                                .toString()
-                                .isNotEmpty) ...[
-                          const SizedBox(height: 4),
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
                           Text(
-                            data['description'],
-                            style: const TextStyle(
-                                color: _NB.textGrey, fontSize: 12),
+                            data['name'] ?? '',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                              color: isOutOfStock
+                                  ? Colors.grey.shade500
+                                  : _NB.navy,
+                            ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: isOutOfStock
+                                      ? Colors.grey.shade100
+                                      : _NB.orangeBg,
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  'Rs. ${data['price']}',
+                                  style: TextStyle(
+                                    color: isOutOfStock
+                                        ? Colors.grey.shade400
+                                        : _NB.orange,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ),
+                              if (quantity > 0) ...[
+                                const SizedBox(width: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: isLowStock
+                                        ? _NB.yellowBg
+                                        : _NB.greenBg,
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    'Qty: $quantity',
+                                    style: TextStyle(
+                                      color: isLowStock
+                                          ? _NB.yellow
+                                          : _NB.green,
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                          if (data['description'] != null &&
+                              data['description'].toString().isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              data['description'],
+                              style: const TextStyle(
+                                  color: _NB.textGrey, fontSize: 12),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
                         ],
-                      ]),
+                      ),
                     ),
                     Column(children: [
                       _iconBtn(
-                        icon:  Icons.edit_outlined,
+                        icon: Icons.edit_outlined,
                         color: _NB.navy,
                         onTap: () => Navigator.push(
                           context,
                           MaterialPageRoute(
                             builder: (_) => AddProductPage(
-                              shopId:        widget.shopId,
+                              shopId: widget.shopId,
                               editProductId: productId,
-                              editData:      data,
+                              editData: data,
                             ),
                           ),
                         ),
                       ),
                       const SizedBox(height: 6),
                       _iconBtn(
-                        icon:  Icons.delete_outline,
+                        icon: Icons.delete_outline,
                         color: _NB.red,
                         onTap: () => _deleteProduct(productId),
                       ),
@@ -801,8 +1016,8 @@ class _AddProductPageState extends State<AddProductPage>
   );
 
   Widget _iconBtn({
-    required IconData     icon,
-    required Color        color,
+    required IconData icon,
+    required Color color,
     required VoidCallback onTap,
   }) {
     return InkWell(
@@ -829,7 +1044,6 @@ class _AddProductPageState extends State<AddProductPage>
 
     return Scaffold(
       backgroundColor: _NB.bg,
-
       appBar: AppBar(
         backgroundColor: _NB.navy,
         elevation: 0,
@@ -851,7 +1065,6 @@ class _AddProductPageState extends State<AddProductPage>
           ),
         ]),
       ),
-
       body: FadeTransition(
         opacity: _fadeAnim,
         child: SlideTransition(
@@ -861,7 +1074,6 @@ class _AddProductPageState extends State<AddProductPage>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-
                 Container(
                   decoration: BoxDecoration(
                     color: _NB.surface,
@@ -880,73 +1092,266 @@ class _AddProductPageState extends State<AddProductPage>
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-
                         _sectionHeader(
                           isEdit ? 'Edit Product Details' : 'Product Details',
                           Icons.inventory_2_outlined,
                         ),
 
-                        // Image picker (mandatory in both add & edit)
+                        // ── Image Picker ──
                         _imagePicker(),
                         const SizedBox(height: 18),
 
-                        // Name field
-                        TextFormField(
-                          controller: _nameController,
-                          textCapitalization: TextCapitalization.words,
-                          decoration: _inputDec(
-                            label: 'Product Name *',
-                            icon:  Icons.label_outline,
-                            hint:  'e.g. Fresh Apples (1kg)',
-                          ),
-                          validator: (v) =>
-                              v == null || v.isEmpty
-                                  ? 'Enter product name'
-                                  : null,
+                        // ── Product Name ──
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            TextFormField(
+                              controller: _nameController,
+                              focusNode: _nameFocusNode,
+                              textCapitalization: TextCapitalization.words,
+                              maxLength: 50,
+                              decoration: _inputDec(
+                                label: 'Product Name *',
+                                icon: Icons.label_outline,
+                                hint: 'e.g. Fresh Apples (1kg)',
+                              ),
+                              onChanged: (value) {
+                                // Trim extra spaces
+                                if (value != value.trim()) {
+                                  _nameController.value = TextEditingValue(
+                                    text: value.trim(),
+                                    selection: TextSelection.collapsed(
+                                      offset: value.trim().length,
+                                    ),
+                                  );
+                                }
+                              },
+                              validator: (v) {
+                                if (v == null || v.trim().isEmpty) {
+                                  return 'Product name is required';
+                                }
+                                if (v.trim().length < 2) {
+                                  return 'Minimum 2 characters required';
+                                }
+                                if (v.trim().length > 50) {
+                                  return 'Maximum 50 characters allowed';
+                                }
+                                return null;
+                              },
+                            ),
+                            // Character counter
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4, right: 4),
+                              child: Align(
+                                alignment: Alignment.centerRight,
+                                child: Text(
+                                  '${_nameController.text.trim().length}/50',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: _nameController.text.trim().length > 50
+                                        ? _NB.red
+                                        : _NB.textGrey,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                         const SizedBox(height: 14),
 
-                        // Description field
-                        TextFormField(
-                          controller: _descController,
-                          maxLines: 3,
-                          decoration: _inputDec(
-                            label: 'Description (optional)',
-                            icon:  Icons.description_outlined,
-                            hint:  'Brief description of the product...',
-                          ),
+                        // ── Description ──
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            TextFormField(
+                              controller: _descController,
+                              focusNode: _descFocusNode,
+                              maxLines: 3,
+                              maxLength: 200,
+                              decoration: _inputDec(
+                                label: 'Description (optional)',
+                                icon: Icons.description_outlined,
+                                hint: 'Brief description of the product...',
+                              ),
+                              validator: (v) {
+                                if (v != null && v.trim().length > 200) {
+                                  return 'Maximum 200 characters allowed';
+                                }
+                                return null;
+                              },
+                            ),
+                            // Character counter
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4, right: 4),
+                              child: Align(
+                                alignment: Alignment.centerRight,
+                                child: Text(
+                                  '${_descController.text.trim().length}/200',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: _descController.text.trim().length > 200
+                                        ? _NB.red
+                                        : _NB.textGrey,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                         const SizedBox(height: 14),
 
-                        // Price field
+                        // ── Price ──
                         TextFormField(
                           controller: _priceController,
-                          keyboardType:
-                              const TextInputType.numberWithOptions(
-                                  decimal: true),
+                          focusNode: _priceFocusNode,
+                          keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true),
                           decoration: _inputDec(
                             label: 'Price (Rs.) *',
-                            icon:  Icons.currency_rupee,
-                            hint:  'e.g. 150',
+                            prefixWidget: Container(
+                              alignment: Alignment.center,
+                              width: 40,
+                              child: const Text(
+                                'Rs.',
+                                style: TextStyle(
+                                  color: _NB.orange,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 15,
+                                ),
+                              ),
+                            ),
+                            hint: 'e.g. 150',
                           ),
-                          validator: (v) =>
-                              v == null || v.isEmpty
-                                  ? 'Enter price'
-                                  : null,
+                          validator: (v) {
+                            if (v == null || v.trim().isEmpty) {
+                              return 'Price is required';
+                            }
+                            final price = double.tryParse(v.trim());
+                            if (price == null) {
+                              return 'Enter a valid price';
+                            }
+                            if (price < 0) {
+                              return 'Price cannot be negative';
+                            }
+                            if (price > 9999999.99) {
+                              return 'Maximum price is 99,99,999.99';
+                            }
+                            return null;
+                          },
                         ),
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 14),
 
-                        // Out of Stock toggle (edit mode only)
-                        if (isEdit) ...[
-                          _sectionHeader(
-                              'Stock Status', Icons.store_outlined),
-                          _outOfStockToggle(),
-                          const SizedBox(height: 6),
-                        ],
+                        // ── Quantity ──
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            TextFormField(
+                              controller: _quantityController,
+                              focusNode: _quantityFocusNode,
+                              keyboardType: TextInputType.number,
+                              decoration: _inputDec(
+                                label: 'Quantity *',
+                                icon: Icons.numbers_outlined,
+                                hint: 'e.g. 10 (0 for out of stock)',
+                              ),
+                              validator: (v) {
+                                if (v == null || v.trim().isEmpty) {
+                                  return 'Quantity is required';
+                                }
+                                final quantity = int.tryParse(v.trim());
+                                if (quantity == null) {
+                                  return 'Enter a valid whole number';
+                                }
+                                if (quantity < 0) {
+                                  return 'Quantity cannot be negative';
+                                }
+                                if (quantity > 9999) {
+                                  return 'Maximum quantity is 9999';
+                                }
+                                return null;
+                              },
+                            ),
+                            const SizedBox(height: 6),
 
-                        const SizedBox(height: 6),
+                            // ── Live stock status indicator ──
+                            Builder(
+                              builder: (context) {
+                                final qtyText = _quantityController.text.trim();
+                                final qty = int.tryParse(qtyText);
+                                String statusText;
+                                Color statusColor;
+                                Color statusBg;
+                                IconData statusIcon;
+                                
+                                if (qty == null || qtyText.isEmpty) {
+                                  statusText = 'Enter quantity to see stock status';
+                                  statusColor = _NB.textGrey;
+                                  statusBg = _NB.bg;
+                                  statusIcon = Icons.info_outline;
+                                } else if (qty <= 0) {
+                                  statusText = 'Out of Stock (quantity is 0)';
+                                  statusColor = _NB.red;
+                                  statusBg = _NB.redBg;
+                                  statusIcon = Icons.warning_rounded;
+                                } else if (qty <= 5) {
+                                  statusText = 'Low Stock (only $qty items left)';
+                                  statusColor = _NB.yellow;
+                                  statusBg = _NB.yellowBg;
+                                  statusIcon = Icons.warning_rounded;
+                                } else {
+                                  statusText = 'In Stock ($qty items available)';
+                                  statusColor = _NB.green;
+                                  statusBg = _NB.greenBg;
+                                  statusIcon = Icons.check_circle_rounded;
+                                }
 
-                        // Submit button
+                                return Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 12, vertical: 8),
+                                  decoration: BoxDecoration(
+                                    color: statusBg,
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(
+                                      color: statusColor.withOpacity(0.3),
+                                    ),
+                                  ),
+                                  child: Row(children: [
+                                    Icon(statusIcon,
+                                        color: statusColor, size: 16),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(statusText,
+                                          style: TextStyle(
+                                              color: statusColor,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w500)),
+                                    ),
+                                  ]),
+                                );
+                              },
+                            ),
+                            const SizedBox(height: 4),
+                            
+                            // ── Note about auto stock status ──
+                            Row(
+                              children: [
+                                Icon(Icons.info_outline,
+                                    size: 12, color: _NB.textGrey),
+                                const SizedBox(width: 4),
+                                const Text(
+                                  'Stock status is automatically determined by quantity',
+                                  style: TextStyle(
+                                      fontSize: 10, color: _NB.textGrey),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 18),
+
+                        // ── Submit Button ──
                         SizedBox(
                           width: double.infinity,
                           height: 52,
@@ -955,8 +1360,8 @@ class _AddProductPageState extends State<AddProductPage>
                               backgroundColor: _NB.orange,
                               elevation: 0,
                               shape: RoundedRectangleBorder(
-                                  borderRadius:
-                                      BorderRadius.circular(14)),
+                                borderRadius: BorderRadius.circular(14),
+                              ),
                             ),
                             onPressed: _loading ? null : _saveProduct,
                             child: _loading
@@ -969,8 +1374,7 @@ class _AddProductPageState extends State<AddProductPage>
                                     ),
                                   )
                                 : Row(
-                                    mainAxisAlignment:
-                                        MainAxisAlignment.center,
+                                    mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
                                       Icon(
                                         isEdit
@@ -994,7 +1398,7 @@ class _AddProductPageState extends State<AddProductPage>
                           ),
                         ),
 
-                        // Cancel button (edit mode only)
+                        // ── Cancel Button (Edit mode) ──
                         if (isEdit) ...[
                           const SizedBox(height: 10),
                           SizedBox(
@@ -1002,15 +1406,13 @@ class _AddProductPageState extends State<AddProductPage>
                             height: 48,
                             child: OutlinedButton(
                               style: OutlinedButton.styleFrom(
-                                side: const BorderSide(
-                                    color: _NB.border),
+                                side: const BorderSide(color: _NB.border),
                                 shape: RoundedRectangleBorder(
-                                    borderRadius:
-                                        BorderRadius.circular(14)),
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
                                 foregroundColor: _NB.textGrey,
                               ),
-                              onPressed: () =>
-                                  Navigator.pop(context),
+                              onPressed: () => Navigator.pop(context),
                               child: const Text('Cancel'),
                             ),
                           ),
@@ -1022,10 +1424,9 @@ class _AddProductPageState extends State<AddProductPage>
 
                 const SizedBox(height: 24),
 
-                // Product list (add mode only)
+                // ── Product List (Add mode only) ──
                 if (!isEdit) ...[
-                  _sectionHeader(
-                      'My Products', Icons.storefront_outlined),
+                  _sectionHeader('My Products', Icons.storefront_outlined),
                   _productList(),
                   const SizedBox(height: 16),
                 ],

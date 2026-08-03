@@ -208,118 +208,8 @@ class _ShopDetailPageState extends State<ShopDetailPage> {
               ],
             ),
           ),
-          const SizedBox(height: 6),
-          GestureDetector(
-            onTap: () => _downloadImage(url),
-            child: Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 14, vertical: 8),
-              decoration: BoxDecoration(
-                color: _navyCard,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                    color: _white.withOpacity(0.1)),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.download_rounded,
-                      color: _white.withOpacity(0.7),
-                      size: 16),
-                  const SizedBox(width: 6),
-                  Text(
-                    'Download',
-                    style: TextStyle(
-                      color: _white.withOpacity(0.7),
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
         ],
       ),
-    );
-  }
-
-  // ── Status history ────────────────────────────────────────────
-  Widget _statusHistory() {
-    final status =
-        (widget.shopData['status'] ?? 'pending').toLowerCase();
-    final submittedAt = widget.shopData['created_at'];
-
-    final List<Map<String, dynamic>> history = [
-      if (status == 'verified' || status == 'rejected')
-        {
-          'label':
-              status == 'verified' ? 'Verified' : 'Rejected',
-          'color': status == 'verified'
-              ? Colors.greenAccent
-              : Colors.redAccent,
-          'active': true,
-        },
-      {
-        'label': 'Submitted',
-        'color': _white.withOpacity(0.4),
-        'active': false,
-      },
-    ];
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: history.map((item) {
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 12),
-          child: Row(
-            children: [
-              Container(
-                width: 10,
-                height: 10,
-                decoration: BoxDecoration(
-                  color: item['active'] as bool
-                      ? item['color'] as Color
-                      : Colors.transparent,
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: item['color'] as Color,
-                    width: 2,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment:
-                      CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      item['label'] as String,
-                      style: TextStyle(
-                        color: item['active'] as bool
-                            ? item['color'] as Color
-                            : _white.withOpacity(0.5),
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13,
-                      ),
-                    ),
-                    Text(
-                      item['active'] as bool
-                          ? 'Recently updated'
-                          : (submittedAt?.toString() ??
-                              'Unknown date'),
-                      style: TextStyle(
-                        color: _white.withOpacity(0.3),
-                        fontSize: 11,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        );
-      }).toList(),
     );
   }
 
@@ -364,13 +254,6 @@ class _ShopDetailPageState extends State<ShopDetailPage> {
           ),
         ),
         centerTitle: true,
-        actions: [
-          IconButton(
-            icon: Icon(Icons.more_vert,
-                color: _white.withOpacity(0.7)),
-            onPressed: () {},
-          ),
-        ],
       ),
       body: Column(
         children: [
@@ -563,9 +446,6 @@ class _ShopDetailPageState extends State<ShopDetailPage> {
                           'Hours',
                           '${data['open_time'] ?? 'N/A'} – ${data['close_time'] ?? 'N/A'}',
                         ),
-                        _divider(),
-                        _detailRow('Description',
-                            data['shop_description'] ?? 'N/A'),
                       ],
                     ),
                   ),
@@ -581,23 +461,6 @@ class _ShopDetailPageState extends State<ShopDetailPage> {
                       data['cnic_front_url'], 'CNIC Front'),
                   _documentCard(
                       data['cnic_back_url'], 'CNIC Back'),
-
-                  const SizedBox(height: 20),
-
-                  // ════════════════════════════════════════
-                  // SECTION 3 — Activity / Status History
-                  // ════════════════════════════════════════
-                  _sectionHeader(
-                      'Status History', Icons.history_rounded),
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: _navyCard,
-                      borderRadius:
-                          BorderRadius.circular(14),
-                    ),
-                    child: _statusHistory(),
-                  ),
 
                   const SizedBox(height: 20),
 
@@ -750,17 +613,6 @@ class _FullScreenImage extends StatelessWidget {
               color: Colors.white),
           onPressed: () => Navigator.pop(context),
         ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.download_rounded,
-                color: Colors.white),
-            onPressed: () async {
-              final uri = Uri.parse(imageUrl);
-              if (await canLaunchUrl(uri))
-                await launchUrl(uri);
-            },
-          ),
-        ],
       ),
       body: Center(
         child: InteractiveViewer(

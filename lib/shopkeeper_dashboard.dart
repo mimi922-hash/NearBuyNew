@@ -394,7 +394,7 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
     );
   }
 
-  // ── ENHANCED GREETING HEADER ──────────────────────────────────────
+  // ── FIXED: GREETING HEADER with overflow protection ──────────────
   Widget _greetingHeader() {
     final shopStatus = _shopData?['status'] ?? '';
     final isVerified = shopStatus == 'verified';
@@ -411,7 +411,7 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
     ][DateTime.now().weekday];
 
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
           colors: [Color(0xFF0D1F3C), Color(0xFF1A3A6B)],
@@ -436,8 +436,8 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                 onTap: _openProfilePage,
                 child: Stack(children: [
                   Container(
-                    width: 54,
-                    height: 54,
+                    width: 48,
+                    height: 48,
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(14),
                       gradient: const LinearGradient(
@@ -448,11 +448,12 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                       borderRadius: BorderRadius.circular(12),
                       child: _profileImageUrl != null
                           ? Image.network(_profileImageUrl!,
-                              fit: BoxFit.cover)
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => const Icon(Icons.person, color: accentOrange, size: 24))
                           : Container(
                               color: accentOrange.withOpacity(0.2),
                               child: const Icon(Icons.person,
-                                  color: accentOrange, size: 26)),
+                                  color: accentOrange, size: 24)),
                     ),
                   ),
                   if (_isUploading)
@@ -461,7 +462,7 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                             color: Colors.white, strokeWidth: 2)),
                 ]),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -469,7 +470,7 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                     // Role chip
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 3),
+                          horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
                           color: accentOrange.withOpacity(0.18),
                           borderRadius: BorderRadius.circular(20)),
@@ -482,11 +483,11 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                             Text('Shopkeeper',
                                 style: TextStyle(
                                     color: accentOrange,
-                                    fontSize: 10,
+                                    fontSize: 9,
                                     fontWeight: FontWeight.w700)),
                           ]),
                     ),
-                    const SizedBox(height: 5),
+                    const SizedBox(height: 4),
                     Row(
                       children: [
                         Flexible(
@@ -494,16 +495,17 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                             'Hello, ${_shopkeeperName ?? 'Shopkeeper'} 👋',
                             style: const TextStyle(
                                 color: Colors.white,
-                                fontSize: 16,
+                                fontSize: 14,
                                 fontWeight: FontWeight.bold),
                             overflow: TextOverflow.ellipsis,
+                            maxLines: 1,
                           ),
                         ),
                         if (isVerified) ...[
-                          const SizedBox(width: 6),
+                          const SizedBox(width: 4),
                           Container(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 7, vertical: 3),
+                                horizontal: 5, vertical: 2),
                             decoration: BoxDecoration(
                               color: const Color(0xFF2EC878).withOpacity(0.18),
                               border: Border.all(
@@ -515,16 +517,16 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Container(
-                                    width: 5,
-                                    height: 5,
+                                    width: 4,
+                                    height: 4,
                                     decoration: const BoxDecoration(
                                         color: Color(0xFF2EC878),
                                         shape: BoxShape.circle)),
-                                const SizedBox(width: 4),
+                                const SizedBox(width: 3),
                                 const Text('Verified',
                                     style: TextStyle(
                                         color: Color(0xFF2EC878),
-                                        fontSize: 9,
+                                        fontSize: 8,
                                         fontWeight: FontWeight.w700)),
                               ],
                             ),
@@ -538,8 +540,9 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                         _shopData!['shop_name'],
                         style: TextStyle(
                             color: Colors.white.withOpacity(0.6),
-                            fontSize: 12),
+                            fontSize: 11),
                         overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
                       ),
                     ],
                   ],
@@ -548,19 +551,26 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
             ],
           ),
 
-          const SizedBox(height: 14),
-          // ── Divider ───────────────────────────────────────────
+          const SizedBox(height: 10),
           Divider(color: Colors.white.withOpacity(0.12), height: 1),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
 
-          // ── Detail rows ───────────────────────────────────────
-          _heroDetailRow(
-              Icons.location_on_outlined,
-              _shopData?['shop_location'] ?? 'No address set'),
-          const SizedBox(height: 8),
+          // ── Detail rows with smaller text ───────────────────
           Row(
             children: [
               Expanded(
+                child: _heroDetailRow(
+                  Icons.location_on_outlined,
+                  _shopData?['shop_location'] ?? 'No address',
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Expanded(
+                flex: 5,
                 child: _heroDetailRow(
                   Icons.phone_outlined,
                   _ownerContact ??
@@ -569,8 +579,9 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                   highlight: true,
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 8),
               Expanded(
+                flex: 4,
                 child: _heroDetailRow(
                   Icons.category_outlined,
                   _shopData?['shop_category'] ?? '—',
@@ -578,17 +589,16 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           _heroDetailRow(
               Icons.badge_outlined,
               'Reg: ${_shopData?['registration_no'] ?? '—'}'),
 
           // ── Today timing row ──────────────────────────────────
           if (shopHours != null && dayData != null) ...[
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
               decoration: BoxDecoration(
                 color: isOpen
                     ? const Color(0xFF2EC878).withOpacity(0.12)
@@ -598,7 +608,7 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                       ? const Color(0xFF2EC878).withOpacity(0.35)
                       : Colors.white.withOpacity(0.15),
                 ),
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(8),
               ),
               child: Row(
                 children: [
@@ -609,9 +619,9 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                     color: isOpen
                         ? const Color(0xFF2EC878)
                         : Colors.white54,
-                    size: 14,
+                    size: 12,
                   ),
-                  const SizedBox(width: 6),
+                  const SizedBox(width: 4),
                   Expanded(
                     child: Text(
                       isOpen
@@ -621,15 +631,16 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                           color: isOpen
                               ? const Color(0xFF2EC878)
                               : Colors.white54,
-                          fontSize: 11,
+                          fontSize: 10,
                           fontWeight: FontWeight.w600),
                       overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
                     ),
                   ),
                   GestureDetector(
                     onTap: _openShopTimingPage,
                     child: Icon(Icons.edit_outlined,
-                        color: Colors.white.withOpacity(0.4), size: 14),
+                        color: Colors.white.withOpacity(0.4), size: 12),
                   ),
                 ],
               ),
@@ -648,8 +659,8 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
             color: highlight
                 ? accentOrange
                 : Colors.white.withOpacity(0.45),
-            size: 13),
-        const SizedBox(width: 5),
+            size: 11),
+        const SizedBox(width: 4),
         Flexible(
           child: Text(
             text,
@@ -657,17 +668,18 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                 color: highlight
                     ? accentOrange
                     : Colors.white.withOpacity(0.65),
-                fontSize: 11,
+                fontSize: 10,
                 fontWeight:
                     highlight ? FontWeight.w600 : FontWeight.normal),
             overflow: TextOverflow.ellipsis,
+            maxLines: 1,
           ),
         ),
       ],
     );
   }
 
-  // ── STATS ROW: orders, products + fee box + oos box + revenue box ─
+  // ── FIXED: STATS ROW with responsive chips ──────────────────────
   Widget _statsRow() {
     if (_shopId == null) return const SizedBox.shrink();
 
@@ -686,38 +698,71 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                     true)
                 .length
             : 0;
+        
+        // ── Calculate low stock (quantity > 0 and <= 5) ──
+        final int lowStockCount = snapshot.hasData
+            ? snapshot.data!.docs
+                .where((d) {
+                  final data = d.data() as Map<String, dynamic>;
+                  final int quantity = data['quantity'] ?? 0;
+                  return quantity > 0 && quantity <= 5 && data['out_of_stock'] != true;
+                })
+                .length
+            : 0;
 
         return Column(
           children: [
-            // ── Top chips: pending orders + total products ────
+            // ── FIXED: Responsive chips with smaller padding ──
             Row(children: [
-              _statChip(
-                icon: Icons.pending_actions_outlined,
-                value: '$_pendingOrdersCount',
-                label: 'Pending Orders',
-                color: accentOrange,
-                bg: orangeLight,
-                onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) =>
-                            ShopkeeperOrdersScreen(shopId: _shopId!))),
+              Expanded(
+                child: _statChip(
+                  icon: Icons.pending_actions_outlined,
+                  value: '$_pendingOrdersCount',
+                  label: 'Pending',
+                  color: accentOrange,
+                  bg: orangeLight,
+                  onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) =>
+                              ShopkeeperOrdersScreen(shopId: _shopId!))),
+                ),
               ),
-              const SizedBox(width: 10),
-              _statChip(
-                icon: Icons.inventory_2_outlined,
-                value: '$totalProducts',
-                label: 'Total Products',
-                color: primaryNavy,
-                bg: navyLight,
-                onTap: () {
-                  if (_productListKey.currentContext != null) {
-                    Scrollable.ensureVisible(
-                        _productListKey.currentContext!,
-                        duration: const Duration(milliseconds: 400),
-                        curve: Curves.easeInOut);
-                  }
-                },
+              const SizedBox(width: 8),
+              Expanded(
+                child: _statChip(
+                  icon: Icons.inventory_2_outlined,
+                  value: '$totalProducts',
+                  label: 'Total',
+                  color: primaryNavy,
+                  bg: navyLight,
+                  onTap: () {
+                    if (_productListKey.currentContext != null) {
+                      Scrollable.ensureVisible(
+                          _productListKey.currentContext!,
+                          duration: const Duration(milliseconds: 400),
+                          curve: Curves.easeInOut);
+                    }
+                  },
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _statChip(
+                  icon: Icons.warning_amber_rounded,
+                  value: '$lowStockCount',
+                  label: 'Low Stock',
+                  color: accentYellow,
+                  bg: yellowLight,
+                  onTap: () {
+                    if (_productListKey.currentContext != null) {
+                      Scrollable.ensureVisible(
+                          _productListKey.currentContext!,
+                          duration: const Duration(milliseconds: 400),
+                          curve: Curves.easeInOut);
+                    }
+                  },
+                ),
               ),
             ]),
 
@@ -726,7 +771,7 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
             // ── Total Revenue box ─────────────────────────────
             Container(
               padding: const EdgeInsets.symmetric(
-                  horizontal: 14, vertical: 12),
+                  horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
                 color: cardWhite,
                 borderRadius: BorderRadius.circular(14),
@@ -742,14 +787,14 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
               child: Row(
                 children: [
                   Container(
-                    padding: const EdgeInsets.all(9),
+                    padding: const EdgeInsets.all(7),
                     decoration: BoxDecoration(
                         color: greenLight,
-                        borderRadius: BorderRadius.circular(12)),
+                        borderRadius: BorderRadius.circular(10)),
                     child: const Icon(Icons.trending_up_rounded,
-                        color: accentGreen, size: 20),
+                        color: accentGreen, size: 16),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 10),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -759,18 +804,19 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                           style: const TextStyle(
                               color: accentGreen,
                               fontWeight: FontWeight.w800,
-                              fontSize: 16),
+                              fontSize: 14),
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        const Text('Total Revenue (delivered orders)',
+                        const Text('Total Revenue',
                             style: TextStyle(
                                 color: Colors.grey,
-                                fontSize: 11)),
+                                fontSize: 10)),
                       ],
                     ),
                   ),
                   Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 4),
+                        horizontal: 6, vertical: 3),
                     decoration: BoxDecoration(
                       color: greenLight,
                       borderRadius: BorderRadius.circular(20),
@@ -780,9 +826,9 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                     child: const Text('EARNED',
                         style: TextStyle(
                             color: accentGreen,
-                            fontSize: 9,
+                            fontSize: 8,
                             fontWeight: FontWeight.w800,
-                            letterSpacing: 0.5)),
+                            letterSpacing: 0.3)),
                   ),
                 ],
               ),
@@ -799,7 +845,7 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                             ShopkeeperBillingScreen(shopId: _shopId!))),
                 child: Container(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 14, vertical: 12),
+                      horizontal: 12, vertical: 10),
                   decoration: BoxDecoration(
                     color: cardWhite,
                     borderRadius: BorderRadius.circular(14),
@@ -816,32 +862,33 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                   child: Row(
                     children: [
                       Container(
-                        padding: const EdgeInsets.all(9),
+                        padding: const EdgeInsets.all(7),
                         decoration: BoxDecoration(
                             color: orangeLight,
-                            borderRadius: BorderRadius.circular(12)),
+                            borderRadius: BorderRadius.circular(10)),
                         child: const Icon(
                             Icons.account_balance_wallet_outlined,
                             color: accentOrange,
-                            size: 20),
+                            size: 16),
                       ),
-                      const SizedBox(width: 12),
+                      const SizedBox(width: 10),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'Rs. ${_shopData!['pending_fee']} Pending Fee',
+                              'Rs. ${_shopData!['pending_fee']} Pending',
                               style: const TextStyle(
                                   color: accentOrange,
                                   fontWeight: FontWeight.w700,
-                                  fontSize: 13),
+                                  fontSize: 12),
+                              overflow: TextOverflow.ellipsis,
                             ),
                             Text(
                               '${_shopData!['unpaid_order_count'] ?? 0} unpaid orders',
                               style: const TextStyle(
                                   color: Colors.grey,
-                                  fontSize: 11),
+                                  fontSize: 10),
                             ),
                           ],
                         ),
@@ -858,7 +905,7 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
               const SizedBox(height: 10),
               Container(
                 padding: const EdgeInsets.symmetric(
-                    horizontal: 14, vertical: 12),
+                    horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
                   color: redLight,
                   borderRadius: BorderRadius.circular(14),
@@ -868,39 +915,40 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                 child: Row(
                   children: [
                     Container(
-                      padding: const EdgeInsets.all(9),
+                      padding: const EdgeInsets.all(7),
                       decoration: BoxDecoration(
                           color: Colors.red.shade100,
-                          borderRadius: BorderRadius.circular(12)),
+                          borderRadius: BorderRadius.circular(10)),
                       child: Icon(
                           Icons.remove_shopping_cart_outlined,
                           color: accentRed,
-                          size: 20),
+                          size: 16),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 10),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            '$outOfStock Products Out of Stock',
+                            '$outOfStock Out of Stock',
                             style: const TextStyle(
                                 color: accentRed,
                                 fontWeight: FontWeight.w700,
-                                fontSize: 13),
+                                fontSize: 12),
+                            overflow: TextOverflow.ellipsis,
                           ),
                           Text(
-                            '$outOfStock out of $totalProducts products unavailable',
+                            '$outOfStock of $totalProducts unavailable',
                             style: TextStyle(
                                 color: Colors.red.shade400,
-                                fontSize: 11),
+                                fontSize: 10),
                           ),
                         ],
                       ),
                     ),
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 4),
+                          horizontal: 6, vertical: 3),
                       decoration: BoxDecoration(
                         color: Colors.red.shade100,
                         borderRadius: BorderRadius.circular(20),
@@ -910,7 +958,7 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                       child: Text('$outOfStock',
                           style: TextStyle(
                               color: accentRed,
-                              fontSize: 12,
+                              fontSize: 11,
                               fontWeight: FontWeight.w800)),
                     ),
                   ],
@@ -939,8 +987,7 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
       label = 'PENDING';
     }
     return Container(
-      padding:
-          const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
       decoration: BoxDecoration(
         color: color.withOpacity(0.1),
         border: Border.all(color: color.withOpacity(0.4)),
@@ -949,12 +996,13 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
       child: Text(label,
           style: TextStyle(
               color: color,
-              fontSize: 9,
+              fontSize: 8,
               fontWeight: FontWeight.w800,
-              letterSpacing: 0.5)),
+              letterSpacing: 0.3)),
     );
   }
 
+  // ── FIXED: Stat chip with responsive sizing ──────────────────────
   Widget _statChip({
     required IconData icon,
     required String value,
@@ -963,40 +1011,47 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
     required Color bg,
     VoidCallback? onTap,
   }) {
-    return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 14),
-          decoration: BoxDecoration(
-            color: bg,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: color.withOpacity(0.15)),
-          ),
-          child: Row(children: [
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: color.withOpacity(0.15)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
             Container(
-              padding: const EdgeInsets.all(8),
+              padding: const EdgeInsets.all(5),
               decoration: BoxDecoration(
                   color: color.withOpacity(0.14),
-                  borderRadius: BorderRadius.circular(10)),
-              child: Icon(icon, color: color, size: 18),
+                  borderRadius: BorderRadius.circular(8)),
+              child: Icon(icon, color: color, size: 14),
             ),
-            const SizedBox(width: 10),
-            Column(
+            const SizedBox(width: 6),
+            Expanded(
+              child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(value,
                       style: TextStyle(
                           fontWeight: FontWeight.bold,
-                          fontSize: 18,
-                          color: color)),
+                          fontSize: 15,
+                          color: color),
+                      overflow: TextOverflow.ellipsis),
                   Text(label,
                       style: TextStyle(
-                          fontSize: 10,
+                          fontSize: 9,
                           color: color.withOpacity(0.75),
-                          fontWeight: FontWeight.w500)),
-                ]),
-          ]),
+                          fontWeight: FontWeight.w500),
+                      overflow: TextOverflow.ellipsis),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -1007,7 +1062,7 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
     if (notif.isEmpty) return const SizedBox.shrink();
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: yellowLight,
         borderRadius: BorderRadius.circular(14),
@@ -1015,15 +1070,17 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
       ),
       child: Row(children: [
         const Icon(Icons.notifications_active_outlined,
-            color: accentYellow, size: 20),
-        const SizedBox(width: 10),
+            color: accentYellow, size: 18),
+        const SizedBox(width: 8),
         Expanded(
             child: Text(notif,
                 style: const TextStyle(
-                    fontSize: 13, color: Color(0xFF7A5700)))),
+                    fontSize: 12, color: Color(0xFF7A5700)),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 2)),
         GestureDetector(
           onTap: _clearNotification,
-          child: const Icon(Icons.close, size: 18, color: Colors.grey),
+          child: const Icon(Icons.close, size: 16, color: Colors.grey),
         )
       ]),
     );
@@ -1039,12 +1096,12 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
     final secs = _remainingTime.inSeconds % 60;
     final expired = _remainingTime == Duration.zero;
     final timeStr = expired
-        ? 'Time khatam!'
+        ? 'Expired!'
         : '${mins.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
         color: const Color(0xFFFFF3E0),
         borderRadius: BorderRadius.circular(16),
@@ -1052,50 +1109,51 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
       ),
       child: Row(children: [
         Container(
-          padding: const EdgeInsets.all(9),
+          padding: const EdgeInsets.all(7),
           decoration: const BoxDecoration(
               color: Color(0xFFFF6F00), shape: BoxShape.circle),
           child: const Icon(Icons.timer_outlined,
-              color: Colors.white, size: 16),
+              color: Colors.white, size: 14),
         ),
-        const SizedBox(width: 12),
+        const SizedBox(width: 10),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                'Receipt reject ho gayi — dobara upload karein',
+                'Receipt rejected — upload again',
                 style: TextStyle(
                   color: Color(0xFFE65100),
                   fontWeight: FontWeight.bold,
-                  fontSize: 12.5,
+                  fontSize: 11,
                 ),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
               ),
-              const SizedBox(height: 4),
               Text(
                 expired
-                    ? 'Shop suspend ho jayegi. Abhi billing screen pe jayen.'
-                    : 'Warna shop suspend ho jayegi:',
+                    ? 'Shop will be suspended. Go to billing.'
+                    : 'Shop suspended in:',
                 style: const TextStyle(
-                    color: Color(0xFFBF360C), fontSize: 11.5),
+                    color: Color(0xFFBF360C), fontSize: 10),
               ),
             ],
           ),
         ),
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           decoration: BoxDecoration(
             color: expired
                 ? const Color(0xFFB71C1C)
                 : const Color(0xFFFF6F00),
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(8),
           ),
           child: Text(
             timeStr,
             style: const TextStyle(
               color: Colors.white,
               fontWeight: FontWeight.bold,
-              fontSize: 16,
+              fontSize: 14,
               fontFeatures: [FontFeature.tabularFigures()],
             ),
           ),
@@ -1108,7 +1166,7 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
     if (_billingStatus != 'suspended') return const SizedBox.shrink();
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: redLight,
         borderRadius: BorderRadius.circular(16),
@@ -1116,12 +1174,12 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
       ),
       child: Row(children: [
         Container(
-            padding: const EdgeInsets.all(9),
+            padding: const EdgeInsets.all(7),
             decoration: const BoxDecoration(
                 color: accentRed, shape: BoxShape.circle),
             child: const Icon(Icons.warning_amber_rounded,
-                color: Colors.white, size: 16)),
-        const SizedBox(width: 12),
+                color: Colors.white, size: 14)),
+        const SizedBox(width: 10),
         const Expanded(
             child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1130,25 +1188,19 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                   style: TextStyle(
                       color: accentRed,
                       fontWeight: FontWeight.bold,
-                      fontSize: 13)),
-              SizedBox(height: 3),
+                      fontSize: 12)),
               Text(
-                  'Correct receipt upload karein taake shop wapas active ho jaye.',
+                  'Upload correct receipt to reactivate.',
                   style: TextStyle(
-                      color: Color(0xFFB71C1C), fontSize: 12)),
+                      color: Color(0xFFB71C1C), fontSize: 11),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 2),
             ])),
       ]),
     );
   }
 
-  Widget _todayTimingBanner() {
-    if (_shopId == null || _shopData?['status'] != 'verified')
-      return const SizedBox.shrink();
-    // Already shown in hero header — skip standalone banner
-    return const SizedBox.shrink();
-  }
-
-  // ── QUICK ACTIONS — redesigned ────────────────────────────────────
+  // ── QUICK ACTIONS ────────────────────────────────────────────────────
   Widget _quickActions() {
     final qs = _shopData?['status'] ?? '';
     if (qs != 'verified' && qs != 'suspended') return const SizedBox.shrink();
@@ -1193,7 +1245,7 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
       _actionCard(
         icon: Icons.schedule_outlined,
         title: 'Shop Timings',
-        subtitle: 'Set weekly open/close hours & closures',
+        subtitle: 'Set weekly hours',
         color: const Color(0xFF7B5EA7),
         bg: const Color(0xFFF3EEF9),
         onTap: isSuspended ? null : _openShopTimingPage,
@@ -1223,16 +1275,16 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
         final m = _remainingTime.inMinutes.toString().padLeft(2, '0');
         final s =
             (_remainingTime.inSeconds % 60).toString().padLeft(2, '0');
-        subtitle = 'Receipt reject — $m:$s bacha hai ⚠️';
+        subtitle = 'Receipt rejected — $m:$s left ⚠️';
       } else {
-        subtitle = 'Grace period khatam — Abhi upload karein!';
+        subtitle = 'Grace period expired!';
       }
     } else if (_billingPaymentStatus == 'pending_verification') {
       subtitle = 'Receipt submitted — awaiting verification';
     } else if (_billingPaymentStatus == 'paid') {
       subtitle = 'Payment confirmed ✓';
     } else {
-      subtitle = 'Monthly fee due — tap to pay now';
+      subtitle = 'Monthly fee due — tap to pay';
     }
 
     final IconData icon = _billingPaymentStatus == 'paid'
@@ -1271,32 +1323,32 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
     final card = GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
           color: cardWhite,
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(16),
           border: Border.all(color: color.withOpacity(0.12)),
           boxShadow: [
             BoxShadow(
                 color: color.withOpacity(0.07),
-                blurRadius: 12,
-                offset: const Offset(0, 4))
+                blurRadius: 10,
+                offset: const Offset(0, 3))
           ],
         ),
         child: Row(children: [
           Container(
-            padding: const EdgeInsets.all(11),
+            padding: const EdgeInsets.all(9),
             decoration: BoxDecoration(
-                color: bg, borderRadius: BorderRadius.circular(13)),
+                color: bg, borderRadius: BorderRadius.circular(11)),
             child: Stack(clipBehavior: Clip.none, children: [
-              Icon(icon, color: color, size: 22),
+              Icon(icon, color: color, size: 18),
               if (badgeDot)
                 Positioned(
-                    right: -4,
-                    top: -4,
+                    right: -3,
+                    top: -3,
                     child: Container(
-                        width: 9,
-                        height: 9,
+                        width: 7,
+                        height: 7,
                         decoration: BoxDecoration(
                             color: accentRed,
                             shape: BoxShape.circle,
@@ -1304,10 +1356,10 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                                 color: Colors.white, width: 1.5)))),
               if (badge > 0)
                 Positioned(
-                    right: -8,
-                    top: -8,
+                    right: -6,
+                    top: -6,
                     child: Container(
-                        padding: const EdgeInsets.all(4),
+                        padding: const EdgeInsets.all(3),
                         decoration: BoxDecoration(
                             color: accentOrange,
                             shape: BoxShape.circle,
@@ -1316,11 +1368,11 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                         child: Text('$badge',
                             style: const TextStyle(
                                 color: Colors.white,
-                                fontSize: 10,
+                                fontSize: 8,
                                 fontWeight: FontWeight.bold)))),
             ]),
           ),
-          const SizedBox(width: 14),
+          const SizedBox(width: 10),
           Expanded(
               child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1328,23 +1380,27 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                 Text(title,
                     style: const TextStyle(
                         fontWeight: FontWeight.w700,
-                        fontSize: 14,
-                        color: primaryNavy)),
-                const SizedBox(height: 3),
+                        fontSize: 13,
+                        color: primaryNavy),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1),
+                const SizedBox(height: 2),
                 Text(subtitle,
                     style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey.shade500)),
+                        fontSize: 11,
+                        color: Colors.grey.shade500),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 2),
               ])),
           Icon(Icons.arrow_forward_ios_rounded,
-              size: 14, color: color.withOpacity(0.5)),
+              size: 12, color: color.withOpacity(0.5)),
         ]),
       ),
     );
 
     if (isDisabled) {
       return ClipRRect(
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(16),
         child: Stack(
           children: [
             card,
@@ -1357,7 +1413,7 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                     style: TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.bold,
-                      fontSize: 13,
+                      fontSize: 11,
                       letterSpacing: 0.5,
                     ),
                   ),
@@ -1379,23 +1435,23 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
           MaterialPageRoute(builder: (_) => AddProductPage(shopId: _shopId!))),
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
         decoration: BoxDecoration(
           gradient: const LinearGradient(
               colors: [accentOrange, Color(0xFFFF8C42)],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight),
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
                 color: accentOrange.withOpacity(0.28),
-                blurRadius: 12,
-                offset: const Offset(0, 5))
+                blurRadius: 10,
+                offset: const Offset(0, 4))
           ],
         ),
         child: const Row(children: [
-          Icon(Icons.add_circle_outline, color: Colors.white, size: 22),
-          SizedBox(width: 12),
+          Icon(Icons.add_circle_outline, color: Colors.white, size: 20),
+          SizedBox(width: 10),
           Expanded(
               child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1404,17 +1460,18 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                     style: TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.bold,
-                        fontSize: 14)),
+                        fontSize: 13)),
                 Text('List a product in your shop',
-                    style: TextStyle(color: Colors.white70, fontSize: 11)),
+                    style: TextStyle(color: Colors.white70, fontSize: 10)),
               ])),
           Icon(Icons.arrow_forward_ios_rounded,
-              color: Colors.white54, size: 14),
+              color: Colors.white54, size: 12),
         ]),
       ),
     );
   }
 
+  // ── FIXED: Product list with proper overflow handling ────────────
   Widget _productList() {
     if (_shopId == null) return const SizedBox.shrink();
     return StreamBuilder<QuerySnapshot>(
@@ -1437,25 +1494,25 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
         if (products.isEmpty) {
           return _card(
             padding:
-                const EdgeInsets.symmetric(vertical: 32, horizontal: 16),
+                const EdgeInsets.symmetric(vertical: 28, horizontal: 16),
             child: Column(children: [
               Container(
-                padding: const EdgeInsets.all(18),
+                padding: const EdgeInsets.all(14),
                 decoration: const BoxDecoration(
                     color: orangeLight, shape: BoxShape.circle),
                 child: const Icon(Icons.inventory_2_outlined,
-                    size: 36, color: accentOrange),
+                    size: 30, color: accentOrange),
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 10),
               const Text('No products yet',
                   style: TextStyle(
                       fontWeight: FontWeight.bold,
-                      fontSize: 15,
+                      fontSize: 14,
                       color: primaryNavy)),
-              const SizedBox(height: 6),
-              Text('Add your first product to start selling.',
+              const SizedBox(height: 4),
+              Text('Add your first product.',
                   style:
-                      TextStyle(color: Colors.grey.shade500, fontSize: 13)),
+                      TextStyle(color: Colors.grey.shade500, fontSize: 12)),
             ]),
           );
         }
@@ -1466,155 +1523,204 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
             ...products.map((doc) {
               final data = doc.data() as Map<String, dynamic>;
               final bool isOutOfStock = data['out_of_stock'] == true;
-              return Opacity(
-                opacity: isOutOfStock ? 0.65 : 1.0,
-                child: Container(
-                  margin: const EdgeInsets.only(bottom: 10),
-                  decoration: BoxDecoration(
-                    color: cardWhite,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: isOutOfStock
-                          ? accentRed.withOpacity(0.25)
-                          : dividerColor,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                          color: primaryNavy.withOpacity(0.04),
-                          blurRadius: 10,
-                          offset: const Offset(0, 3))
-                    ],
+              final int quantity = data['quantity'] ?? 0;
+              final bool isLowStock = quantity > 0 && quantity <= 5 && !isOutOfStock;
+              
+              return Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                decoration: BoxDecoration(
+                  color: cardWhite,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: isOutOfStock
+                        ? accentRed.withOpacity(0.25)
+                        : isLowStock
+                            ? accentYellow.withOpacity(0.4)
+                            : dividerColor,
                   ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Row(children: [
-                      Stack(children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: data['image_url'] != null
-                              ? Image.network(data['image_url'],
-                                  width: 72,
-                                  height: 72,
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (_, __, ___) =>
-                                      _productPlaceholder())
-                              : _productPlaceholder(),
-                        ),
-                        if (isOutOfStock)
-                          Positioned.fill(
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(12),
-                              child: Container(
-                                color: Colors.black.withOpacity(0.45),
-                                alignment: Alignment.center,
-                                child: const Text('OUT OF\nSTOCK',
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 8,
-                                        fontWeight: FontWeight.bold,
-                                        letterSpacing: 0.5)),
-                              ),
+                  boxShadow: [
+                    BoxShadow(
+                        color: primaryNavy.withOpacity(0.04),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2))
+                  ],
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(10),
+                  child: Row(children: [
+                    Stack(children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: data['image_url'] != null
+                            ? Image.network(data['image_url'],
+                                width: 56,
+                                height: 56,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) =>
+                                    _productPlaceholder())
+                            : _productPlaceholder(),
+                      ),
+                      if (isOutOfStock)
+                        Positioned.fill(
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child: Container(
+                              color: Colors.black.withOpacity(0.45),
+                              alignment: Alignment.center,
+                              child: const Text('OUT',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 7,
+                                      fontWeight: FontWeight.bold)),
                             ),
                           ),
-                      ]),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(data['name'],
-                                  style: TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.bold,
-                                      color: isOutOfStock
-                                          ? Colors.grey.shade500
-                                          : primaryNavy)),
-                              const SizedBox(height: 5),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 8, vertical: 3),
-                                decoration: BoxDecoration(
-                                  color: isOutOfStock
-                                      ? Colors.grey.shade100
-                                      : orangeLight,
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                                child: Text('Rs. ${data['price']}',
-                                    style: TextStyle(
-                                        color: isOutOfStock
-                                            ? Colors.grey.shade400
-                                            : accentOrange,
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 13)),
-                              ),
-                              if (data['description'] != null &&
-                                  data['description']
-                                      .toString()
-                                      .isNotEmpty)
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 4),
-                                  child: Text(data['description'],
+                        ),
+                      if (isLowStock && !isOutOfStock)
+                        Positioned(
+                          top: 2,
+                          right: 2,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 4, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: accentYellow,
+                              borderRadius: BorderRadius.circular(3),
+                            ),
+                            child: const Text('LOW',
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 6,
+                                    fontWeight: FontWeight.bold)),
+                          ),
+                        ),
+                    ]),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(data['name'] ?? '',
+                                style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.bold,
+                                    color: isOutOfStock
+                                        ? Colors.grey.shade500
+                                        : primaryNavy),
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 1),
+                            const SizedBox(height: 3),
+                            Wrap(
+                              spacing: 4,
+                              runSpacing: 4,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: isOutOfStock
+                                        ? Colors.grey.shade100
+                                        : orangeLight,
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text('Rs. ${data['price']}',
                                       style: TextStyle(
-                                          color: Colors.grey.shade500,
-                                          fontSize: 11),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis),
+                                          color: isOutOfStock
+                                              ? Colors.grey.shade400
+                                              : accentOrange,
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 11)),
                                 ),
+                                if (quantity > 0)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: isLowStock
+                                          ? yellowLight
+                                          : greenLight,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text('Qty: $quantity',
+                                        style: TextStyle(
+                                            color: isLowStock
+                                                ? accentYellow
+                                                : accentGreen,
+                                            fontWeight: FontWeight.w600,
+                                            fontSize: 10)),
+                                  ),
+                              ],
+                            ),
+                          ]),
+                    ),
+                    // ── Edit button ──
+                    GestureDetector(
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => AddProductPage(
+                              shopId: _shopId!,
+                              editProductId: doc.id,
+                              editData: data,
+                            ),
+                          ),
+                        );
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 7, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: isOutOfStock 
+                              ? redLight 
+                              : isLowStock
+                                  ? yellowLight
+                                  : greenLight,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                              color: isOutOfStock
+                                  ? accentRed.withOpacity(0.3)
+                                  : isLowStock
+                                      ? accentYellow.withOpacity(0.3)
+                                      : accentGreen.withOpacity(0.3)),
+                        ),
+                        child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                isOutOfStock
+                                    ? Icons.inventory_2_outlined
+                                    : isLowStock
+                                        ? Icons.warning_amber_rounded
+                                        : Icons.check_circle_outline,
+                                size: 14,
+                                color: isOutOfStock 
+                                    ? accentRed 
+                                    : isLowStock
+                                        ? accentYellow
+                                        : accentGreen,
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                isOutOfStock 
+                                    ? 'Edit' 
+                                    : isLowStock
+                                        ? 'Low'
+                                        : 'In',
+                                style: TextStyle(
+                                    fontSize: 7,
+                                    fontWeight: FontWeight.bold,
+                                    color: isOutOfStock 
+                                        ? accentRed 
+                                        : isLowStock
+                                            ? accentYellow
+                                            : accentGreen),
+                              ),
                             ]),
                       ),
-                      GestureDetector(
-                        onTap: () async {
-                          await FirebaseFirestore.instance
-                              .collection('shops')
-                              .doc(_shopId)
-                              .collection('products')
-                              .doc(doc.id)
-                              .update({'out_of_stock': !isOutOfStock});
-                          _showSnack(
-                            isOutOfStock
-                                ? '${data['name']} is now In Stock'
-                                : '${data['name']} marked as Out of Stock',
-                            isOutOfStock ? accentGreen : accentRed,
-                          );
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 9, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: isOutOfStock ? redLight : greenLight,
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(
-                                color: isOutOfStock
-                                    ? accentRed.withOpacity(0.3)
-                                    : accentGreen.withOpacity(0.3)),
-                          ),
-                          child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  isOutOfStock
-                                      ? Icons.inventory_2_outlined
-                                      : Icons.check_circle_outline,
-                                  size: 18,
-                                  color:
-                                      isOutOfStock ? accentRed : accentGreen,
-                                ),
-                                const SizedBox(height: 3),
-                                Text(
-                                  isOutOfStock ? 'Restock' : 'In Stock',
-                                  style: TextStyle(
-                                      fontSize: 9,
-                                      fontWeight: FontWeight.bold,
-                                      color: isOutOfStock
-                                          ? accentRed
-                                          : accentGreen),
-                                ),
-                              ]),
-                        ),
-                      ),
-                    ]),
-                  ),
+                    ),
+                  ]),
                 ),
               );
             }).toList(),
@@ -1625,11 +1731,11 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
   }
 
   Widget _productPlaceholder() => Container(
-        width: 72,
-        height: 72,
+        width: 56,
+        height: 56,
         decoration: BoxDecoration(
-            color: orangeLight, borderRadius: BorderRadius.circular(12)),
-        child: const Icon(Icons.image_outlined, color: accentOrange, size: 28),
+            color: orangeLight, borderRadius: BorderRadius.circular(10)),
+        child: const Icon(Icons.image_outlined, color: accentOrange, size: 22),
       );
 
   Widget _shopStatusSection() {
@@ -1637,37 +1743,37 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
       return _card(
         child: Column(children: [
           Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(14),
             decoration: const BoxDecoration(
                 color: orangeLight, shape: BoxShape.circle),
             child: const Icon(Icons.storefront_outlined,
-                color: accentOrange, size: 36),
+                color: accentOrange, size: 30),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 10),
           const Text('No Shop Registered',
               style: TextStyle(
                   fontWeight: FontWeight.bold,
-                  fontSize: 16,
+                  fontSize: 15,
                   color: primaryNavy)),
-          const SizedBox(height: 6),
-          Text('Register your shop to start selling on NearBuy.',
-              style: TextStyle(color: Colors.grey.shade500, fontSize: 13),
+          const SizedBox(height: 4),
+          Text('Register your shop to start selling.',
+              style: TextStyle(color: Colors.grey.shade500, fontSize: 12),
               textAlign: TextAlign.center),
-          const SizedBox(height: 18),
+          const SizedBox(height: 14),
           SizedBox(
             width: double.infinity,
-            height: 50,
+            height: 44,
             child: ElevatedButton.icon(
               style: ElevatedButton.styleFrom(
                   backgroundColor: accentOrange,
                   shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14)),
+                      borderRadius: BorderRadius.circular(12)),
                   elevation: 0),
               icon: const Icon(Icons.add_business_outlined,
-                  color: Colors.white),
+                  color: Colors.white, size: 18),
               label: const Text('Register Shop',
                   style: TextStyle(
-                      color: Colors.white, fontWeight: FontWeight.bold)),
+                      color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
               onPressed: () => Navigator.push(
                   context,
                   MaterialPageRoute(
@@ -1692,7 +1798,7 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
     } else if (status == 'pending') {
       statusColor = accentYellow;
       statusIcon = Icons.hourglass_top_rounded;
-      statusText = 'Pending Approval';
+      statusText = 'Pending';
       statusBg = yellowLight;
     } else {
       statusColor = accentRed;
@@ -1707,7 +1813,7 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Container(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(14),
               decoration: const BoxDecoration(
                 color: primaryNavy,
                 borderRadius:
@@ -1715,14 +1821,14 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
               ),
               child: Row(children: [
                 Container(
-                  padding: const EdgeInsets.all(10),
+                  padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
                       color: Colors.white.withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(12)),
+                      borderRadius: BorderRadius.circular(10)),
                   child: const Icon(Icons.store_mall_directory_outlined,
-                      color: Colors.white, size: 22),
+                      color: Colors.white, size: 18),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 10),
                 Expanded(
                     child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1731,31 +1837,35 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                           style: const TextStyle(
                               color: Colors.white,
                               fontWeight: FontWeight.bold,
-                              fontSize: 15)),
+                              fontSize: 14),
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1),
                       Text(_shopData!['shop_category'] ?? '',
                           style: const TextStyle(
-                              color: Colors.white54, fontSize: 12)),
+                              color: Colors.white54, fontSize: 11),
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1),
                     ])),
                 Container(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 5),
+                      horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
                       color: statusBg,
                       borderRadius: BorderRadius.circular(20)),
                   child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(statusIcon, color: statusColor, size: 12),
-                    const SizedBox(width: 4),
+                    Icon(statusIcon, color: statusColor, size: 10),
+                    const SizedBox(width: 3),
                     Text(statusText,
                         style: TextStyle(
                             color: statusColor,
-                            fontSize: 11,
+                            fontSize: 9,
                             fontWeight: FontWeight.bold)),
                   ]),
                 ),
               ]),
             ),
             Padding(
-              padding: const EdgeInsets.all(14),
+              padding: const EdgeInsets.all(12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -1765,17 +1875,21 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                       _shopData!['shop_location'] ?? 'No address',
                     ),
                   ]),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 8),
                   Row(children: [
                     const Icon(Icons.phone_outlined,
-                        size: 14, color: accentOrange),
-                    const SizedBox(width: 6),
-                    Text(
-                      'Contact: ${_ownerContact ?? _shopData!['owner_contact'] ?? 'Not provided'}',
-                      style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey.shade700,
-                          fontWeight: FontWeight.w600),
+                        size: 12, color: accentOrange),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        'Contact: ${_ownerContact ?? _shopData!['owner_contact'] ?? 'Not provided'}',
+                        style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.grey.shade700,
+                            fontWeight: FontWeight.w600),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
+                      ),
                     ),
                   ]),
                 ],
@@ -1787,13 +1901,14 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
 
   Widget _shopInfoItem(IconData icon, String text) => Expanded(
         child: Row(children: [
-          Icon(icon, size: 14, color: Colors.grey.shade400),
-          const SizedBox(width: 5),
+          Icon(icon, size: 12, color: Colors.grey.shade400),
+          const SizedBox(width: 4),
           Expanded(
               child: Text(text,
                   style: TextStyle(
-                      fontSize: 12, color: Colors.grey.shade600),
-                  overflow: TextOverflow.ellipsis)),
+                      fontSize: 11, color: Colors.grey.shade600),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1)),
         ]),
       );
 
@@ -1801,27 +1916,27 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
       {Color? color}) {
     return ListTile(
       leading: Container(
-        padding: const EdgeInsets.all(8),
+        padding: const EdgeInsets.all(6),
         decoration: BoxDecoration(
             color: (color ?? primaryNavy).withOpacity(0.08),
-            borderRadius: BorderRadius.circular(10)),
-        child: Icon(icon, color: color ?? primaryNavy, size: 18),
+            borderRadius: BorderRadius.circular(8)),
+        child: Icon(icon, color: color ?? primaryNavy, size: 16),
       ),
       title: Text(label,
           style: TextStyle(
               color: color ?? primaryNavy,
               fontWeight: FontWeight.w600,
-              fontSize: 14)),
+              fontSize: 13)),
       trailing: Icon(Icons.arrow_forward_ios,
-          size: 13, color: Colors.grey.shade400),
+          size: 11, color: Colors.grey.shade400),
       shape:
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       onTap: () {
         Navigator.pop(context);
         onTap();
       },
       contentPadding:
-          const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
     );
   }
 
@@ -1832,19 +1947,19 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
       drawer: Drawer(
         shape: const RoundedRectangleBorder(
             borderRadius: BorderRadius.only(
-                topRight: Radius.circular(28),
-                bottomRight: Radius.circular(28))),
+                topRight: Radius.circular(24),
+                bottomRight: Radius.circular(24))),
         child: Column(children: [
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(20, 56, 20, 28),
+            padding: const EdgeInsets.fromLTRB(16, 40, 16, 20),
             decoration: const BoxDecoration(
               gradient: LinearGradient(
                   colors: [primaryNavy, lightNavy],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight),
               borderRadius:
-                  BorderRadius.only(bottomRight: Radius.circular(28)),
+                  BorderRadius.only(bottomRight: Radius.circular(24)),
             ),
             child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1854,20 +1969,20 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                       onTap: _openProfilePage,
                       child: Stack(children: [
                         Container(
-                          padding: const EdgeInsets.all(3),
+                          padding: const EdgeInsets.all(2),
                           decoration: const BoxDecoration(
                               shape: BoxShape.circle,
                               gradient: LinearGradient(
                                   colors: [accentOrange, accentYellow])),
                           child: CircleAvatar(
-                            radius: 32,
+                            radius: 28,
                             backgroundColor: Colors.white,
                             backgroundImage: _profileImageUrl != null
                                 ? NetworkImage(_profileImageUrl!)
                                 : null,
                             child: _profileImageUrl == null
                                 ? const Icon(Icons.person,
-                                    color: primaryNavy, size: 32)
+                                    color: primaryNavy, size: 28)
                                 : null,
                           ),
                         ),
@@ -1881,18 +1996,18 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                           child: GestureDetector(
                             onTap: _pickAndUploadImage,
                             child: Container(
-                              padding: const EdgeInsets.all(5),
+                              padding: const EdgeInsets.all(4),
                               decoration: const BoxDecoration(
                                   color: accentOrange,
                                   shape: BoxShape.circle),
                               child: const Icon(Icons.camera_alt,
-                                  color: Colors.white, size: 11),
+                                  color: Colors.white, size: 9),
                             ),
                           ),
                         ),
                       ]),
                     ),
-                    const SizedBox(width: 14),
+                    const SizedBox(width: 10),
                     Expanded(
                       child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1901,26 +2016,31 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                                 style: const TextStyle(
                                     color: Colors.white,
                                     fontWeight: FontWeight.bold,
-                                    fontSize: 16)),
-                            const SizedBox(height: 4),
+                                    fontSize: 14),
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 1),
+                            const SizedBox(height: 2),
                             Text(user?.email ?? '',
                                 style: const TextStyle(
-                                    color: Colors.white60, fontSize: 12),
-                                overflow: TextOverflow.ellipsis),
+                                    color: Colors.white60, fontSize: 10),
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 1),
                             if (_ownerContact != null &&
                                 _ownerContact!.isNotEmpty) ...[
-                              const SizedBox(height: 3),
+                              const SizedBox(height: 2),
                               Text(_ownerContact!,
                                   style: const TextStyle(
-                                      color: Colors.white54, fontSize: 11)),
+                                      color: Colors.white54, fontSize: 10),
+                                  overflow: TextOverflow.ellipsis,
+                                  maxLines: 1),
                             ],
                           ]),
                     ),
                   ]),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 10),
                   Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 5),
+                        horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
                         color: accentOrange.withOpacity(0.2),
                         borderRadius: BorderRadius.circular(20),
@@ -1928,22 +2048,22 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                             color: accentOrange.withOpacity(0.4))),
                     child: const Row(mainAxisSize: MainAxisSize.min, children: [
                       Icon(Icons.store_outlined,
-                          color: accentOrange, size: 13),
-                      SizedBox(width: 5),
+                          color: accentOrange, size: 11),
+                      SizedBox(width: 4),
                       Text('Shopkeeper',
                           style: TextStyle(
                               color: accentOrange,
-                              fontSize: 11,
+                              fontSize: 10,
                               fontWeight: FontWeight.w600)),
                     ]),
                   ),
                 ]),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           Expanded(
             child: ListView(
               padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               children: [
                 _drawerItem(
                     Icons.person_outline, 'My Profile', _openProfilePage),
@@ -1974,7 +2094,7 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                                 shopId: _shopId!)));
                   }),
                 ],
-                const Divider(color: dividerColor, height: 24),
+                const Divider(color: dividerColor, height: 16),
                 _drawerItem(
                     Icons.logout_rounded, 'Sign Out', _logout,
                     color: accentRed),
@@ -1982,10 +2102,10 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
             ),
           ),
           Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(12),
             child: Text('NearBuy v1.0',
                 style: TextStyle(
-                    color: Colors.grey.shade400, fontSize: 11)),
+                    color: Colors.grey.shade400, fontSize: 9)),
           ),
         ]),
       ),
@@ -1995,7 +2115,7 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
         leading: Builder(
           builder: (ctx) => IconButton(
             icon: const Icon(Icons.menu_rounded,
-                color: Colors.white, size: 26),
+                color: Colors.white, size: 24),
             onPressed: () => Scaffold.of(ctx).openDrawer(),
           ),
         ),
@@ -2005,13 +2125,13 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                 text: 'Near',
                 style: TextStyle(
                     color: Colors.white,
-                    fontSize: 19,
+                    fontSize: 17,
                     fontWeight: FontWeight.bold)),
             TextSpan(
                 text: 'Buy',
                 style: TextStyle(
                     color: accentOrange,
-                    fontSize: 19,
+                    fontSize: 17,
                     fontWeight: FontWeight.bold)),
           ]),
         ),
@@ -2019,14 +2139,14 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
           IconButton(
             icon: Stack(children: [
               const Icon(Icons.notifications_outlined,
-                  color: Colors.white, size: 26),
+                  color: Colors.white, size: 22),
               if ((_shopData?['notification'] ?? '').isNotEmpty)
                 Positioned(
                     right: 0,
                     top: 0,
                     child: Container(
-                        width: 9,
-                        height: 9,
+                        width: 7,
+                        height: 7,
                         decoration: const BoxDecoration(
                             color: accentOrange,
                             shape: BoxShape.circle))),
@@ -2034,18 +2154,18 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
             onPressed: () {},
           ),
           Padding(
-            padding: const EdgeInsets.only(right: 10),
+            padding: const EdgeInsets.only(right: 8),
             child: GestureDetector(
               onTap: _openProfilePage,
               child: CircleAvatar(
-                radius: 17,
+                radius: 15,
                 backgroundColor: accentOrange.withOpacity(0.2),
                 backgroundImage: _profileImageUrl != null
                     ? NetworkImage(_profileImageUrl!)
                     : null,
                 child: _profileImageUrl == null
                     ? const Icon(Icons.person,
-                        color: accentOrange, size: 18)
+                        color: accentOrange, size: 16)
                     : null,
               ),
             ),
@@ -2066,18 +2186,18 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                 },
                 child: SingleChildScrollView(
                   physics: const AlwaysScrollableScrollPhysics(),
-                  padding: const EdgeInsets.fromLTRB(16, 20, 16, 30),
+                  padding: const EdgeInsets.fromLTRB(14, 16, 14, 24),
                   child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         _greetingHeader(),
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 12),
                         _suspendedBanner(),
                         _gracePeriodBanner(),
                         _notificationBanner(),
                         if (_shopData?['status'] == 'verified') ...[
                           _statsRow(),
-                          const SizedBox(height: 16),
+                          const SizedBox(height: 12),
                         ],
                         _sectionLabel(
                             'My Shop', Icons.storefront_outlined),
@@ -2087,7 +2207,7 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                         if (_shopId != null &&
                             _shopData?['status'] == 'verified') ...[
                           _addProductButton(),
-                          const SizedBox(height: 16),
+                          const SizedBox(height: 12),
                           SizedBox(
                               key: _productListKey,
                               child: _productList()),
@@ -2110,7 +2230,7 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-//  SHOP TIMING PAGE  (unchanged)
+//  SHOP TIMING PAGE
 // ══════════════════════════════════════════════════════════════════════════
 
 class ShopTimingPage extends StatefulWidget {
@@ -2695,7 +2815,7 @@ class _ShopTimingPageState extends State<ShopTimingPage> {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-//  PROFILE PAGE  (unchanged)
+//  PROFILE PAGE
 // ══════════════════════════════════════════════════════════════════════════
 
 class _ProfilePage extends StatefulWidget {

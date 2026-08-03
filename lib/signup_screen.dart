@@ -26,6 +26,17 @@ class _SignupScreenState extends State<SignupScreen>
   // ── Brand Colors ──
   static const Color primaryNavy  = Color(0xFF0E2A47);
   static const Color accentOrange = Color(0xFFFF6A1A);
+
+  // ✅ NEW — validation constants & helpers (added, nothing existing removed)
+  static const int _nameMaxLength     = 50;
+  static const int _emailMaxLength    = 50;
+  static const int _passwordMaxLength = 30;
+  static final RegExp _emailRegex =
+      RegExp(r'^[\w\.\-]+@[\w\-]+\.[a-zA-Z]{2,}$');
+  static final RegExp _nameRegex = RegExp(r'^[a-zA-Z\s]{3,50}$');
+
+  bool _isValidEmail(String email) => _emailRegex.hasMatch(email);
+  bool _isValidName(String name)   => _nameRegex.hasMatch(name);
  
   @override
   void initState() {
@@ -64,6 +75,8 @@ class _SignupScreenState extends State<SignupScreen>
   }
  
   // ✅ SIGNUP LOGIC — unchanged + confirm password check
+  // ✅ Only addition: proper name-format and email-format validation before
+  // the existing Firebase create-account flow runs. No existing logic altered.
   Future<void> _signup() async {
     if (widget.role.toLowerCase() == "admin") {
       _showSnack("Admin accounts cannot be created.", Colors.red); return;
@@ -72,6 +85,16 @@ class _SignupScreenState extends State<SignupScreen>
         _emailController.text.trim().isEmpty ||
         _passwordController.text.trim().isEmpty) {
       _showSnack("Please fill all fields.", Colors.red); return;
+    }
+    // ✅ NEW — proper name validation (letters/spaces, min 3 / max 50 chars)
+    if (!_isValidName(_nameController.text.trim())) {
+      _showSnack("Please enter a valid name (letters only, 3-50 characters).", Colors.red);
+      return;
+    }
+    // ✅ NEW — proper email format validation
+    if (!_isValidEmail(_emailController.text.trim())) {
+      _showSnack("Please enter a valid email address.", Colors.red);
+      return;
     }
     // ✅ Confirm password check
     if (_passwordController.text.trim() != _confirmPasswordController.text.trim()) {
@@ -95,7 +118,8 @@ class _SignupScreenState extends State<SignupScreen>
         'role': widget.role,
         'createdAt': FieldValue.serverTimestamp(),
       });
-      _showSnack("\${widget.role} account created! Please login.", Colors.green);
+      // ✅ FIX 1: proper message instead of literal "${widget.role}" text
+      _showSnack("Your account is created! Please login.", Colors.green);
       await Future.delayed(const Duration(milliseconds: 800));
       if (mounted) Navigator.pop(context);
     } on FirebaseAuthException catch (e) {
@@ -187,24 +211,33 @@ class _SignupScreenState extends State<SignupScreen>
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             _buildField(controller: _nameController,
-                                hint: 'Full Name', icon: Icons.person_outline),
+                                hint: 'Full Name', icon: Icons.person_outline,
+                                maxLength: _nameMaxLength), // ✅ NEW — length limit
                             const SizedBox(height: 14),
                             _buildField(controller: _emailController,
-                                hint: 'Phone number or email',
+                                hint: 'Enter Email',
                                 icon: Icons.person_outline,
-                                keyboardType: TextInputType.emailAddress),
+                                keyboardType: TextInputType.emailAddress,
+                                maxLength: _emailMaxLength), // ✅ NEW — length limit
                             const SizedBox(height: 14),
                             // Password
                             TextField(
                               controller: _passwordController,
                               obscureText: _obscureText,
                               onChanged: _checkPasswordStrength,
+                              maxLength: _passwordMaxLength, // ✅ NEW — length limit
+                              buildCounter: (context,
+                                      {required currentLength,
+                                      required isFocused,
+                                      maxLength}) =>
+                                  null, // ✅ NEW — hides default counter text
                               decoration: _inputDec(
                                 hint: 'Password', icon: Icons.lock_outline,
                                 suffix: IconButton(
+                                  // ✅ FIX 2: open eye = text visible, closed eye = text hidden
                                   icon: Icon(_obscureText
-                                      ? Icons.visibility_outlined
-                                      : Icons.visibility_off_outlined,
+                                      ? Icons.visibility_off_outlined
+                                      : Icons.visibility_outlined,
                                       color: Colors.grey),
                                   onPressed: () => setState(() => _obscureText = !_obscureText),
                                 ),
@@ -236,12 +269,19 @@ class _SignupScreenState extends State<SignupScreen>
                               controller: _confirmPasswordController,
                               obscureText: _obscureConfirm,
                               onChanged: (_) => setState(() {}),
+                              maxLength: _passwordMaxLength, // ✅ NEW — length limit
+                              buildCounter: (context,
+                                      {required currentLength,
+                                      required isFocused,
+                                      maxLength}) =>
+                                  null, // ✅ NEW — hides default counter text
                               decoration: _inputDec(
                                 hint: 'Confirm Password', icon: Icons.lock_reset_outlined,
                                 suffix: IconButton(
+                                  // ✅ FIX 2: open eye = text visible, closed eye = text hidden
                                   icon: Icon(_obscureConfirm
-                                      ? Icons.visibility_outlined
-                                      : Icons.visibility_off_outlined,
+                                      ? Icons.visibility_off_outlined
+                                      : Icons.visibility_outlined,
                                       color: Colors.grey),
                                   onPressed: () => setState(() => _obscureConfirm = !_obscureConfirm),
                                 ),
@@ -328,11 +368,16 @@ class _SignupScreenState extends State<SignupScreen>
     required String hint,
     required IconData icon,
     TextInputType keyboardType = TextInputType.text,
+    int? maxLength, // ✅ NEW — optional length limit param
   }) {
     return TextField(
       controller: controller,
       keyboardType: keyboardType,
       onChanged: (_) => setState(() {}),
+      maxLength: maxLength, // ✅ NEW
+      buildCounter: (context,
+              {required currentLength, required isFocused, maxLength}) =>
+          null, // ✅ NEW — hides default counter text
       decoration: _inputDec(hint: hint, icon: icon),
     );
   }
