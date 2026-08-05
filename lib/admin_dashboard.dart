@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'role_selection_screen.dart';
 import 'shop_detail_page.dart';
 import 'admin_billing_screen.dart';
+import 'admin_payment_details_screen.dart';
 
 class AdminDashboard extends StatefulWidget {
   final bool scrollToShops;
@@ -77,6 +78,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
     });
   }
 
+  // ── NEW: Navigate to Payment Account Details ──────────────────
+  void _openPaymentDetails() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const AdminPaymentDetailsScreen(),
+      ),
+    );
+  }
 
   Future<void> _updateShopStatus(
     String shopId,
@@ -104,8 +114,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 
   // ── Dynamic trend calculation ─────────────────────────────────
-  // Returns a stream that compares today's count vs yesterday's count
-  // using 'created_at' timestamp field on each document.
   Stream<Map<String, dynamic>> _trendStream(
     String collection, {
     String? status,
@@ -274,136 +282,114 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 
   // ── Billing banner ────────────────────────────────────────────
+  // ── FIXED: Changed "Total Balance PKR 0" to "Billings" ──────
   Widget _billingBanner() {
     return StreamBuilder<int>(
       stream: _pendingBillingCount(),
       builder: (context, snap) {
         final pending = snap.data ?? 0;
 
-        return StreamBuilder<QuerySnapshot>(
-          stream: FirebaseFirestore.instance
-              .collection('billing')
-              .snapshots(),
-          builder: (context, billSnap) {
-            double totalBalance = 0;
-            if (billSnap.hasData) {
-              for (final doc in billSnap.data!.docs) {
-                final d = doc.data() as Map<String, dynamic>;
-                totalBalance +=
-                    (d['amount'] as num? ?? 0).toDouble();
-              }
-            }
-
-            return GestureDetector(
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                    builder: (_) => const AdminBillingScreen()),
-              ),
-              child: Container(
-                margin:
-                    const EdgeInsets.symmetric(horizontal: 16),
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: _navyCard,
-                  borderRadius: BorderRadius.circular(16),
+        return GestureDetector(
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+                builder: (_) => const AdminBillingScreen()),
+          ),
+          child: Container(
+            margin:
+                const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: _navyCard,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 50,
+                  height: 50,
+                  decoration: BoxDecoration(
+                    color: _accent.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(
+                    Icons.account_balance_wallet,
+                    color: _accent,
+                    size: 26,
+                  ),
                 ),
-                child: Row(
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment:
+                        CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Platform Billing',
+                        style: TextStyle(
+                          color: _white.withOpacity(0.6),
+                          fontSize: 12,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      // ── FIXED: Changed to "Billings" ──
+                      const Text(
+                        'Billings',
+                        style: TextStyle(
+                          color: _white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Container(
-                      width: 50,
-                      height: 50,
-                      decoration: BoxDecoration(
-                        color: _accent.withOpacity(0.15),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: const Icon(
-                        Icons.account_balance_wallet,
-                        color: _accent,
-                        size: 26,
-                      ),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment:
-                            CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Platform Billing',
-                            style: TextStyle(
-                              color: _white.withOpacity(0.6),
-                              fontSize: 12,
-                            ),
-                          ),
-                          const SizedBox(height: 3),
-                          const Text(
-                            'Total Balance',
-                            style: TextStyle(
-                              color: _white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
-                            ),
-                          ),
-                          Text(
-                            'PKR ${totalBalance.toStringAsFixed(0)}',
-                            style: const TextStyle(
-                              color: _white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 22,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        if (pending > 0)
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 3),
-                            margin:
-                                const EdgeInsets.only(bottom: 8),
-                            decoration: BoxDecoration(
-                              color:
-                                  _accentOrange.withOpacity(0.2),
-                              borderRadius:
-                                  BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              '$pending pending',
-                              style: const TextStyle(
-                                color: _accentOrange,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 7),
-                          decoration: BoxDecoration(
-                            color: _accent,
-                            borderRadius:
-                                BorderRadius.circular(20),
-                          ),
-                          child: const Text(
-                            'View Payments ›',
-                            style: TextStyle(
-                              color: _white,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                            ),
+                    if (pending > 0)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 3),
+                        margin:
+                            const EdgeInsets.only(bottom: 8),
+                        decoration: BoxDecoration(
+                          color:
+                              _accentOrange.withOpacity(0.2),
+                          borderRadius:
+                              BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          '$pending pending',
+                          style: const TextStyle(
+                            color: _accentOrange,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
-                      ],
+                      ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 7),
+                      decoration: BoxDecoration(
+                        color: _accent,
+                        borderRadius:
+                            BorderRadius.circular(20),
+                      ),
+                      child: const Text(
+                        'View Payments ›',
+                        style: TextStyle(
+                          color: _white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ),
                   ],
                 ),
-              ),
-            );
-          },
+              ],
+            ),
+          ),
         );
       },
     );
@@ -772,8 +758,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   break;
                 case 3:
                   // Reports page — to be built later
-                  // Navigator.push(context,
-                  //   MaterialPageRoute(builder: (_) => const ReportsPage()));
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: const Text(
@@ -845,7 +829,81 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 Scaffold.of(ctx).openDrawer(),
           ),
         ),
+        // ── UPDATED: 3-dot menu with Payment Account Details ──
         actions: [
+          // ── NEW: 3-dot menu with Payment Account Details ──
+          PopupMenuButton<String>(
+            icon: Icon(Icons.more_vert,
+                color: _white.withOpacity(0.8)),
+            color: _navyCard,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12)),
+            onSelected: (value) {
+              if (value == 'profile') {
+                // Profile/Edit Profile - you can add this later
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: const Text('Profile editing coming soon!'),
+                    backgroundColor: _navyCard,
+                    behavior: SnackBarBehavior.floating,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                );
+              } else if (value == 'payment_details') {
+                _openPaymentDetails();
+              } else if (value == 'logout') {
+                _logout();
+              }
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                value: 'profile',
+                child: Row(
+                  children: [
+                    Icon(Icons.person_outline,
+                        color: _white.withOpacity(0.7), size: 20),
+                    const SizedBox(width: 12),
+                    Text('Profile / Edit Profile',
+                        style: TextStyle(
+                            color: _white.withOpacity(0.9),
+                            fontSize: 14)),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'payment_details',
+                child: Row(
+                  children: [
+                    Icon(Icons.account_balance_wallet_outlined,
+                        color: _accentOrange, size: 20),
+                    const SizedBox(width: 12),
+                    Text('Payment Account Details',
+                        style: TextStyle(
+                            color: _white.withOpacity(0.9),
+                            fontSize: 14)),
+                  ],
+                ),
+              ),
+              const PopupMenuDivider(),
+              PopupMenuItem(
+                value: 'logout',
+                child: Row(
+                  children: [
+                    Icon(Icons.logout,
+                        color: Colors.redAccent, size: 20),
+                    const SizedBox(width: 12),
+                    Text('Logout',
+                        style: TextStyle(
+                            color: Colors.redAccent,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          // ── Notification icon ──────────────────────────────
           Stack(
             alignment: Alignment.topRight,
             children: [
@@ -914,6 +972,18 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       builder: (_) =>
                           const AdminBillingScreen()),
                 );
+              },
+            ),
+            // ── NEW: Payment Account Details in drawer ──
+            ListTile(
+              leading: const Icon(
+                  Icons.account_balance_wallet_outlined,
+                  color: _accentOrange),
+              title: const Text('Payment Account Details',
+                  style: TextStyle(color: _white)),
+              onTap: () {
+                Navigator.pop(context);
+                _openPaymentDetails();
               },
             ),
             const Spacer(),
@@ -1142,7 +1212,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     const SizedBox(height: 20),
 
                     // ── Shop Verification header ──────────
-                    // "View All ›" removed as requested
                     const Padding(
                       padding: EdgeInsets.symmetric(
                           horizontal: 20),

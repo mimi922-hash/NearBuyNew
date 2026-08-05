@@ -105,6 +105,7 @@ class _ShopRegistrationPageState extends State<ShopRegistrationPage> {
   // Camera and Gallery via a bottom sheet, instead of always
   // going straight to the gallery. Return type / callers unchanged
   // (still returns File? and is awaited the same way everywhere).
+  // Still used for the Shop Image upload (camera + gallery both allowed).
   // ─────────────────────────────────────────────────────────
   Future<File?> pickImage() async {
     final ImageSource? source = await showModalBottomSheet<ImageSource>(
@@ -162,6 +163,17 @@ class _ShopRegistrationPageState extends State<ShopRegistrationPage> {
     if (source == null) return null;
 
     final XFile? image = await ImagePicker().pickImage(source: source, imageQuality: 85);
+    if (image != null) return File(image.path);
+    return null;
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // ✅ NEW — Camera-only picker, used ONLY for CNIC Front / CNIC Back
+  // uploads. No bottom sheet, no gallery option — tapping the box opens
+  // the camera directly. Shop Image still uses pickImage() (camera + gallery).
+  // ─────────────────────────────────────────────────────────
+  Future<File?> pickCnicImageFromCamera() async {
+    final XFile? image = await ImagePicker().pickImage(source: ImageSource.camera, imageQuality: 85);
     if (image != null) return File(image.path);
     return null;
   }
@@ -286,31 +298,10 @@ class _ShopRegistrationPageState extends State<ShopRegistrationPage> {
     }
   }
 
-  // ✅ NEW — Search a typed place name / address and jump the dialog map to
-  // it. Used only inside the "Select Location on Map" dialog's search bar.
-  // Does not touch _selectedLocation directly — only updates the temporary
-  // pin (tempLocation) via setDialogState, exactly like tap/drag already do,
-  // so the user still has to press "Confirm Location" to save it.
-  Future<void> _searchOnMapDialog(
-      String query, void Function(LatLng) onFound, StateSetter setDialogState) async {
-    final trimmed = query.trim();
-    if (trimmed.isEmpty) return;
-    FocusScope.of(context).unfocus();
-    try {
-      final locations = await locationFromAddress(trimmed);
-      if (locations.isEmpty) {
-        _showLocationMessage('No results found for "$trimmed".');
-        return;
-      }
-      final found = LatLng(locations.first.latitude, locations.first.longitude);
-      onFound(found);
-      await _mapController?.animateCamera(CameraUpdate.newLatLngZoom(found, 16));
-    } catch (e) {
-      _showLocationMessage('Could not search for "$trimmed". Please try a different search term.');
-    }
-  }
-
-  // ── Option 2: Select Location on Map (tap, drag, or search — not restricted to current position) ──
+  // ── Option 2: Select Location on Map ──
+  // ✅ UPDATED — now opens as a FULL PAGE (Navigator.push) instead of a small
+  // AlertDialog, so the map takes up the entire screen. Search / tap / drag
+  // behavior and the Firestore fields written afterward are unchanged.
   Future<void> _selectOnMap() async {
     LatLng initial = _selectedLocation ?? const LatLng(31.5204, 74.3587); // Lahore fallback
 
@@ -326,111 +317,26 @@ class _ShopRegistrationPageState extends State<ShopRegistrationPage> {
       } catch (_) {}
     }
 
-    LatLng tempLocation = initial;
-    // ✅ NEW — search bar controller for this dialog instance only
-    final TextEditingController searchController = TextEditingController();
-
-    await showDialog(
-      context: context,
-      builder: (dialogCtx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-          titlePadding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-          title: const Text('Select Shop Location',
-              style: TextStyle(color: primaryNavy, fontWeight: FontWeight.bold, fontSize: 16)),
-          contentPadding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-          content: SizedBox(
-            height: 480, // ✅ increased slightly to fit the new search bar
-            width: double.maxFinite,
-            child: Column(
-              children: [
-                // ✅ NEW — search bar to find a location by name/address
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
-                  child: TextField(
-                    controller: searchController,
-                    textInputAction: TextInputAction.search,
-                    onSubmitted: (v) => _searchOnMapDialog(
-                        v, (found) => setDialogState(() => tempLocation = found), setDialogState),
-                    decoration: InputDecoration(
-                      hintText: 'Search for a location...',
-                      hintStyle: TextStyle(fontSize: 13, color: Colors.grey.shade500),
-                      prefixIcon: const Icon(Icons.search, color: accentOrange, size: 20),
-                      suffixIcon: IconButton(
-                        icon: const Icon(Icons.arrow_forward_rounded, color: accentOrange),
-                        onPressed: () => _searchOnMapDialog(searchController.text,
-                            (found) => setDialogState(() => tempLocation = found), setDialogState),
-                      ),
-                      isDense: true,
-                      filled: true, fillColor: Colors.white,
-                      contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade200)),
-                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade200)),
-                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: accentOrange, width: 1.5)),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Expanded(
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(14),
-                    child: GoogleMap(
-                      initialCameraPosition: CameraPosition(target: tempLocation, zoom: 15),
-                      onMapCreated: (c) => _mapController = c,
-                      onTap: (latLng) => setDialogState(() => tempLocation = latLng),
-                      markers: {
-                        Marker(
-                          markerId: const MarkerId('shop'),
-                          position: tempLocation,
-                          draggable: true,
-                          onDragEnd: (newPos) => setDialogState(() => tempLocation = newPos),
-                        ),
-                      },
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Search, tap anywhere, or drag the pin to set the exact shop location',
-                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 4),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
-              onPressed: () => Navigator.pop(dialogCtx),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: accentOrange,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-              child: const Text('Confirm Location', style: TextStyle(color: Colors.white)),
-              onPressed: () async {
-                final confirmed = tempLocation;
-                Navigator.pop(dialogCtx);
-                showDialog(context: context, barrierDismissible: false,
-                    builder: (_) => const Center(child: CircularProgressIndicator(color: accentOrange)));
-                final address = await _reverseGeocode(confirmed);
-                if (!mounted) return;
-                Navigator.pop(context); // close loader
-                setState(() {
-                  _selectedLocation = confirmed;
-                  _shopLocationController.text = address ??
-                      '${confirmed.latitude.toStringAsFixed(5)}, ${confirmed.longitude.toStringAsFixed(5)}';
-                });
-                if (address == null) {
-                  _showLocationMessage('Location pin saved, but a readable address could not be found for this point.');
-                }
-              },
-            ),
-          ],
-        ),
-      ),
+    final LatLng? confirmed = await Navigator.push<LatLng>(
+      context,
+      MaterialPageRoute(builder: (_) => _SelectLocationPage(initialLocation: initial)),
     );
+
+    if (confirmed == null) return; // user cancelled / went back without confirming
+
+    showDialog(context: context, barrierDismissible: false,
+        builder: (_) => const Center(child: CircularProgressIndicator(color: accentOrange)));
+    final address = await _reverseGeocode(confirmed);
+    if (!mounted) return;
+    Navigator.pop(context); // close loader
+    setState(() {
+      _selectedLocation = confirmed;
+      _shopLocationController.text = address ??
+          '${confirmed.latitude.toStringAsFixed(5)}, ${confirmed.longitude.toStringAsFixed(5)}';
+    });
+    if (address == null) {
+      _showLocationMessage('Location pin saved, but a readable address could not be found for this point.');
+    }
   }
 
   // ── Option 3: Enter Address Manually ──
@@ -695,11 +601,13 @@ class _ShopRegistrationPageState extends State<ShopRegistrationPage> {
                           maxLength: _phoneMaxLength, // ✅ NEW — length limit
                           validator: (v) => RegExp(r'^03\d{2}-\d{7}$').hasMatch(v!) ? null : 'Format: 03xx-xxxxxxx'),
                       const SizedBox(height: 14),
+                      // ✅ UPDATED — CNIC Front now uses camera-only picker (no gallery option)
                       _imageUploadBox('Upload CNIC Front', Icons.badge, _cnicFrontImage,
-                          () async { File? img = await pickImage(); if (img != null) setState(() => _cnicFrontImage = img); }),
+                          () async { File? img = await pickCnicImageFromCamera(); if (img != null) setState(() => _cnicFrontImage = img); }),
                       const SizedBox(height: 12),
+                      // ✅ UPDATED — CNIC Back now uses camera-only picker (no gallery option)
                       _imageUploadBox('Upload CNIC Back', Icons.badge, _cnicBackImage,
-                          () async { File? img = await pickImage(); if (img != null) setState(() => _cnicBackImage = img); }),
+                          () async { File? img = await pickCnicImageFromCamera(); if (img != null) setState(() => _cnicBackImage = img); }),
                       const SizedBox(height: 24),
                       _bottomButton('Next →', _nextStep, bg: accentOrange),
                     ]),
@@ -747,6 +655,7 @@ class _ShopRegistrationPageState extends State<ShopRegistrationPage> {
                           maxLength: _cnicMaxLength, // ✅ NEW — length limit
                           validator: (v) => RegExp(r'^\d{5}-\d{7}-\d{1}$').hasMatch(v!) ? null : 'Format: XXXXX-XXXXXXX-X'),
                       const SizedBox(height: 4),
+                      // Shop Image keeps camera + gallery choice (unchanged)
                       _imageUploadBox('Upload Shop Image', Icons.store, _shopImage,
                           () async { File? img = await pickImage(); if (img != null) setState(() => _shopImage = img); }),
                       const SizedBox(height: 12),
@@ -761,7 +670,7 @@ class _ShopRegistrationPageState extends State<ShopRegistrationPage> {
                     ]),
                   ),
 
-                  // ── STEP 3: Location (✅ new flexible 3-option system) ──
+                  // ── STEP 3: Location (✅ flexible 3-option system) ──
                   SingleChildScrollView(
                     padding: const EdgeInsets.all(20),
                     child: Column(children: [
@@ -827,6 +736,141 @@ class _ShopRegistrationPageState extends State<ShopRegistrationPage> {
   // ✅ New formatter for Registration Number — keeps "REG-" fixed and only
   // lets the user type up to 6 digits after it.
   final regNoFormatter = [FilteringTextInputFormatter.digitsOnly, _RegNoTextInputFormatter()];
+}
+
+// ─────────────────────────────────────────────────────────
+// ✅ NEW — Full-page "Select Location on Map" screen.
+// Replaces the old small AlertDialog map picker. Same behavior
+// (search bar, tap-to-place-pin, drag pin, Confirm button) but now
+// takes up the entire screen for a much easier map experience.
+// Returns the confirmed LatLng via Navigator.pop(context, latLng),
+// or null if the user backs out without confirming.
+// ─────────────────────────────────────────────────────────
+class _SelectLocationPage extends StatefulWidget {
+  final LatLng initialLocation;
+  const _SelectLocationPage({required this.initialLocation});
+
+  @override
+  State<_SelectLocationPage> createState() => _SelectLocationPageState();
+}
+
+class _SelectLocationPageState extends State<_SelectLocationPage> {
+  static const Color primaryNavy  = Color(0xFF0E2A47);
+  static const Color accentOrange = Color(0xFFFF6A1A);
+
+  late LatLng _tempLocation;
+  GoogleMapController? _mapController;
+  final TextEditingController _searchController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _tempLocation = widget.initialLocation;
+  }
+
+  Future<void> _search(String query) async {
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) return;
+    FocusScope.of(context).unfocus();
+    try {
+      final locations = await locationFromAddress(trimmed);
+      if (locations.isEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('No results found for "$trimmed".')));
+        return;
+      }
+      final found = LatLng(locations.first.latitude, locations.first.longitude);
+      setState(() => _tempLocation = found);
+      await _mapController?.animateCamera(CameraUpdate.newLatLngZoom(found, 16));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Could not search for "$trimmed". Please try a different search term.')));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: primaryNavy,
+        elevation: 0,
+        leading: const BackButton(color: Colors.white),
+        title: const Text('Select Shop Location',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+      ),
+      body: Column(
+        children: [
+          // Search bar
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+            child: TextField(
+              controller: _searchController,
+              textInputAction: TextInputAction.search,
+              onSubmitted: _search,
+              decoration: InputDecoration(
+                hintText: 'Search for a location...',
+                hintStyle: TextStyle(fontSize: 13, color: Colors.grey.shade500),
+                prefixIcon: const Icon(Icons.search, color: accentOrange, size: 20),
+                suffixIcon: IconButton(
+                  icon: const Icon(Icons.arrow_forward_rounded, color: accentOrange),
+                  onPressed: () => _search(_searchController.text),
+                ),
+                isDense: true,
+                filled: true, fillColor: Colors.white,
+                contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade200)),
+                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade200)),
+                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: accentOrange, width: 1.5)),
+              ),
+            ),
+          ),
+          // Full-page map
+          Expanded(
+            child: GoogleMap(
+              initialCameraPosition: CameraPosition(target: _tempLocation, zoom: 15),
+              onMapCreated: (c) => _mapController = c,
+              onTap: (latLng) => setState(() => _tempLocation = latLng),
+              markers: {
+                Marker(
+                  markerId: const MarkerId('shop'),
+                  position: _tempLocation,
+                  draggable: true,
+                  onDragEnd: (newPos) => setState(() => _tempLocation = newPos),
+                ),
+              },
+            ),
+          ),
+          // Hint text + Confirm button
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+            child: Column(
+              children: [
+                Text(
+                  'Search, tap anywhere, or drag the pin to set the exact shop location',
+                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity, height: 52,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: accentOrange, elevation: 0,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
+                    onPressed: () => Navigator.pop(context, _tempLocation),
+                    child: const Text('Confirm Location',
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 // ── formatters unchanged ──

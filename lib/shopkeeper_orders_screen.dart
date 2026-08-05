@@ -45,79 +45,89 @@ class _ShopkeeperOrdersScreenState extends State<ShopkeeperOrdersScreen>
         .snapshots();
   }
 
-  // ── 🔥 NEW: Stock Deduction with Transaction ──
+  // ── 🔥 Stock Deduction with Transaction (FIXED: all reads before all writes) ──
   Future<void> _deductStockForOrder(String orderId, List<dynamic> items) async {
     final FirebaseFirestore firestore = FirebaseFirestore.instance;
-    
+
     try {
       await firestore.runTransaction((transaction) async {
-        // 1. Get the order document
+        // ── 1. ALL READS FIRST ──
         final orderRef = firestore.collection('orders').doc(orderId);
         final orderDoc = await transaction.get(orderRef);
-        
+
         if (!orderDoc.exists) {
           throw Exception('Order not found');
         }
-        
+
         final orderData = orderDoc.data() as Map<String, dynamic>;
-        
-        // 2. CRITICAL: Check if stock was already deducted
+
+        // CRITICAL: Check if stock was already deducted
         if (orderData['stockDeducted'] == true) {
           throw Exception('Stock already deducted for this order');
         }
-        
-        // 3. Check if order status is already delivered
+
+        // Check if order status is already delivered
         if (orderData['status'] == 'delivered') {
           throw Exception('Order already delivered');
         }
-        
-        // 4. For each item, get product and update stock
+
+        // Read all product docs first, keep refs + computed values in memory
+        final List<Map<String, dynamic>> productUpdates = [];
+
         for (var item in items) {
           final productId = item['productId'];
           if (productId == null) {
             throw Exception('Product ID missing for item: ${item['name']}');
           }
-          
+
           final orderedQty = (item['quantity'] as num).toInt();
           if (orderedQty <= 0) continue;
-          
-          // Get product document
+
           final productRef = firestore
               .collection('shops')
               .doc(widget.shopId)
               .collection('products')
               .doc(productId);
-          
-          final productDoc = await transaction.get(productRef);
-          
+
+          final productDoc = await transaction.get(productRef); // READ only
+
           if (!productDoc.exists) {
             throw Exception('Product not found: ${item['name']}');
           }
-          
+
           final productData = productDoc.data() as Map<String, dynamic>;
           final currentQty = (productData['quantity'] as num?)?.toInt() ?? 0;
-          
-          // 5. Check if sufficient stock is available
+
+          // Check if sufficient stock is available
           if (currentQty < orderedQty) {
             throw Exception(
               'Insufficient stock for ${item['name']}. '
               'Available: $currentQty, Ordered: $orderedQty'
             );
           }
-          
-          // 6. Calculate new quantity (never negative)
+
+          // Calculate new quantity (never negative)
           final newQty = currentQty - orderedQty;
           final outOfStock = newQty <= 0;
-          
-          // 7. Update product with new quantity and stock status
-          transaction.update(productRef, {
-            'quantity': newQty,
-            'out_of_stock': outOfStock,
+
+          // Store what to write later — no write yet
+          productUpdates.add({
+            'ref': productRef,
+            'newQty': newQty,
+            'outOfStock': outOfStock,
+          });
+        }
+
+        // ── 2. ALL WRITES AFTER ──
+        for (var update in productUpdates) {
+          transaction.update(update['ref'], {
+            'quantity': update['newQty'],
+            'out_of_stock': update['outOfStock'],
             'updated_at': FieldValue.serverTimestamp(),
           });
         }
-        
-        // 8. Mark order as stock deducted and delivered
+
+        // Mark order as stock deducted and delivered
         transaction.update(orderRef, {
           'status': 'delivered',
           'stockDeducted': true,
@@ -125,7 +135,7 @@ class _ShopkeeperOrdersScreenState extends State<ShopkeeperOrdersScreen>
           'updatedAt': FieldValue.serverTimestamp(),
         });
       });
-      
+
       // Show success message
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -155,7 +165,7 @@ class _ShopkeeperOrdersScreenState extends State<ShopkeeperOrdersScreen>
     }
   }
 
-  // ── Updated: Mark as Delivered with Stock Deduction ──
+  // ── Mark as Delivered with Stock Deduction ──
   Future<void> _markOrderDelivered(String orderId, List<dynamic> items) async {
     // Show loading
     showDialog(
@@ -179,7 +189,7 @@ class _ShopkeeperOrdersScreenState extends State<ShopkeeperOrdersScreen>
     }
   }
 
-  // ── Updated: Simple status update (no stock deduction) ──
+  // ── Simple status update (no stock deduction) ──
   Future<void> _updateOrderStatus(String orderId, String newStatus) async {
     // If marking as delivered, use the stock deduction method
     if (newStatus.toLowerCase() == 'delivered') {
@@ -348,7 +358,7 @@ class _ShopkeeperOrdersScreenState extends State<ShopkeeperOrdersScreen>
               dateStr = '${d.day}/${d.month}/${d.year}  ${d.hour}:${d.minute.toString().padLeft(2,'0')}'; 
             }
             
-            // ── NEW: Check if stock was deducted ──
+            // ── Check if stock was deducted ──
             final bool stockDeducted = data['stockDeducted'] == true;
 
             return GestureDetector(
@@ -394,7 +404,7 @@ class _ShopkeeperOrdersScreenState extends State<ShopkeeperOrdersScreen>
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                          // ── NEW: Stock deducted badge ──
+                          // ── Stock deducted badge ──
                           if (status.toLowerCase() == 'delivered' && stockDeducted)
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -534,7 +544,7 @@ class _ShopkeeperOrdersScreenState extends State<ShopkeeperOrdersScreen>
   }
 }
 
-// ── Updated Order Detail Screen ──
+// ── Order Detail Screen ──
 class OrderDetailScreen extends StatelessWidget {
   final Map<String, dynamic> data;
   final String orderId;
@@ -634,7 +644,7 @@ class OrderDetailScreen extends StatelessWidget {
                   const Expanded(
                     child: Text('Order Details', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: primaryNavy)),
                   ),
-                  // ── NEW: Stock deducted status ──
+                  // ── Stock deducted status ──
                   if (status.toLowerCase() == 'delivered' && stockDeducted)
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -750,7 +760,6 @@ class OrderDetailScreen extends StatelessWidget {
                                 style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: primaryNavy),
                               ),
                               const SizedBox(height: 3),
-                              // ── NEW: Show productId for debugging ──
                               Text(
                                 'Qty: ${item['quantity']}  ·  Rs. ${(item['price'] ?? 0).toStringAsFixed(0)} each',
                                 style: TextStyle(color: Colors.grey.shade500, fontSize: 12),
@@ -782,7 +791,7 @@ class OrderDetailScreen extends StatelessWidget {
             ]),
             const SizedBox(height: 20),
 
-            // ── UPDATED: Action buttons ──
+            // Action buttons
             if (status == 'pending') ...[
               Row(
                 children: [
@@ -821,7 +830,7 @@ class OrderDetailScreen extends StatelessWidget {
                 ],
               ),
             ] else if (status == 'confirmed') ...[
-              // ── UPDATED: Mark as Delivered with stock deduction ──
+              // Mark as Delivered with stock deduction
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
@@ -840,7 +849,7 @@ class OrderDetailScreen extends StatelessWidget {
                 ),
               ),
             ] else if (status == 'delivered') ...[
-              // ── NEW: Show stock deduction status ──
+              // Show stock deduction status
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(

@@ -5,7 +5,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'customer_dashboard.dart';
-import 'screens/my_orders_screen.dart';
+//import 'screens/my_orders_screen.dart';
 import 'nearbuy_theme.dart';
 
 class OrderConfirmationScreen extends StatefulWidget {
@@ -206,26 +206,9 @@ class _OrderConfirmationScreenState extends State<OrderConfirmationScreen>
                     )),
                   ),
                 ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  height: 52,
-                  child: OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: NearBuyColors.navy, width: 1.5),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                    ),
-                    onPressed: () => Navigator.pushAndRemoveUntil(
-                      context,
-                      MaterialPageRoute(builder: (_) => const MyOrdersScreen()),
-                      (_) => false,
-                    ),
-                    icon: const Icon(Icons.receipt_long_rounded, color: NearBuyColors.navy, size: 18),
-                    label: Text('View My Orders', style: GoogleFonts.poppins(
-                      fontSize: 15, fontWeight: FontWeight.w600, color: NearBuyColors.navy,
-                    )),
-                  ),
-                ),
+                // ✅ REMOVED — "View My Orders" button (and the SizedBox
+                // spacer above it) taken out per request. "Back to Home"
+                // button and all other logic/navigation left untouched.
               ],
             ),
           ),

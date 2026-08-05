@@ -57,6 +57,15 @@
 //    so the list refreshes itself exactly at `due_time`, without the
 //    customer needing to manually reload.
 //
+// NOTE (this revision): the Filter Shops bottom sheet now only
+// exposes Distance and Rating controls. Price Range and
+// Availability (Open/Closed) have been removed from the UI only —
+// their underlying matching functions, caches, and the
+// _activeAdvancedFilterCount logic are all left untouched, per
+// request. Since the sheet no longer writes to _priceFilterActive /
+// _availabilityFilter, those simply stay at their inactive defaults
+// and never exclude a shop.
+//
 // No new packages are required — RangeSlider/ChoiceChip/RadioListTile
 // are all built into the Flutter SDK you already use.
 // ============================================================
@@ -927,10 +936,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   void _showFilterSheet() {
     // Local temp state so Reset/Cancel don't affect the list until Apply.
     double? tempDistance = _distanceFilterKm;
-    RangeValues tempPrice = _priceFilter;
-    bool tempPriceActive = _priceFilterActive;
     double tempRating = _ratingFilterMin;
-    String tempAvailability = _availabilityFilter;
 
     final distanceOptions = <Map<String, dynamic>>[
       {'label': 'All', 'value': null},
@@ -1029,44 +1035,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                     ),
                     const SizedBox(height: 20),
 
-                    // ── Price
-                    _filterSectionLabel('💰 Price Range'),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text('Rs. ${tempPrice.start.round()}', style: GoogleFonts.poppins(
-                          fontSize: 12, fontWeight: FontWeight.w600, color: NearBuyColors.navy,
-                        )),
-                        Text('Rs. ${tempPrice.end.round()}', style: GoogleFonts.poppins(
-                          fontSize: 12, fontWeight: FontWeight.w600, color: NearBuyColors.navy,
-                        )),
-                      ],
-                    ),
-                    SliderTheme(
-                      data: SliderTheme.of(ctx).copyWith(
-                        activeTrackColor: NearBuyColors.orange,
-                        inactiveTrackColor: NearBuyColors.divider,
-                        thumbColor: NearBuyColors.navy,
-                        overlayColor: NearBuyColors.navy.withOpacity(0.1),
-                        rangeThumbShape: const RoundRangeSliderThumbShape(enabledThumbRadius: 9),
-                      ),
-                      child: RangeSlider(
-                        min: _priceRangeMin,
-                        max: _priceRangeMax,
-                        divisions: 20,
-                        values: tempPrice,
-                        labels: RangeLabels(
-                          'Rs. ${tempPrice.start.round()}',
-                          'Rs. ${tempPrice.end.round()}',
-                        ),
-                        onChanged: (v) => setSheetState(() {
-                          tempPrice = v;
-                          tempPriceActive = !(v.start == _priceRangeMin && v.end == _priceRangeMax);
-                        }),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-
                     // ── Rating
                     _filterSectionLabel('⭐ Rating'),
                     Wrap(
@@ -1095,33 +1063,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                         );
                       }).toList(),
                     ),
-                    const SizedBox(height: 20),
-
-                    // ── Availability
-                    _filterSectionLabel('🟢 Availability'),
-                    Wrap(
-                      spacing: 8, runSpacing: 8,
-                      children: ['All', 'Open Now', 'Closed'].map((label) {
-                        final value = label == 'Open Now' ? 'Open' : label;
-                        final selected = tempAvailability == value;
-                        return ChoiceChip(
-                          label: Text(label, style: GoogleFonts.poppins(
-                            fontSize: 12,
-                            color: selected ? Colors.white : NearBuyColors.textSecondary,
-                            fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-                          )),
-                          selected: selected,
-                          onSelected: (_) => setSheetState(() => tempAvailability = value),
-                          selectedColor: NearBuyColors.navy,
-                          backgroundColor: NearBuyColors.cream,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(20),
-                            side: BorderSide(color: selected ? NearBuyColors.navy : NearBuyColors.divider),
-                          ),
-                          showCheckmark: false,
-                        );
-                      }).toList(),
-                    ),
                     const SizedBox(height: 24),
 
                     // ── Reset / Apply
@@ -1131,10 +1072,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                           child: OutlinedButton(
                             onPressed: () => setSheetState(() {
                               tempDistance = null;
-                              tempPrice = const RangeValues(_priceRangeMin, _priceRangeMax);
-                              tempPriceActive = false;
                               tempRating = 0;
-                              tempAvailability = 'All';
                             }),
                             style: OutlinedButton.styleFrom(
                               padding: const EdgeInsets.symmetric(vertical: 14),
@@ -1158,10 +1096,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                             onPressed: () {
                               setState(() {
                                 _distanceFilterKm = tempDistance;
-                                _priceFilter = tempPrice;
-                                _priceFilterActive = tempPriceActive;
                                 _ratingFilterMin = tempRating;
-                                _availabilityFilter = tempAvailability;
                               });
                               Navigator.pop(ctx);
                             },
