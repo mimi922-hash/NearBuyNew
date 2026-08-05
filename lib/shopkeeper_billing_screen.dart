@@ -28,26 +28,55 @@ class _ShopkeeperBillingScreenState extends State<ShopkeeperBillingScreen> {
   String? _activeBillingDocId;
   bool _loading = true;
 
+  // ─── NEW: Admin Payment Details ──────────────────────────────────────
+  Map<String, dynamic>? _adminPaymentDetails;
+  bool _loadingPaymentDetails = true;
+
   // ── Countdown timer variables ──────────────────────────────────────
   Timer? _countdownTimer;
   Duration _remainingTime = Duration.zero;
   DateTime? _graceDueTime;
-
-  // FIX: guards against the timer callback and _loadData() both firing a
-  // suspend-write for the same expiry (e.g. screen reopened right as the
-  // timer hits zero, or pull-to-refresh racing the periodic tick).
   bool _suspending = false;
 
   @override
   void initState() {
     super.initState();
     _loadData();
+    _loadAdminPaymentDetails();
   }
 
   @override
   void dispose() {
     _countdownTimer?.cancel();
     super.dispose();
+  }
+
+  // ─── NEW: Load Admin Payment Details from Firestore ──────────────────
+  Future<void> _loadAdminPaymentDetails() async {
+    setState(() => _loadingPaymentDetails = true);
+    try {
+      final doc = await _firestore
+          .collection('adminSettings')
+          .doc('paymentDetails')
+          .get();
+
+      if (doc.exists) {
+        setState(() {
+          _adminPaymentDetails = doc.data();
+        });
+      } else {
+        setState(() {
+          _adminPaymentDetails = null;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading admin payment details: $e');
+      setState(() {
+        _adminPaymentDetails = null;
+      });
+    } finally {
+      setState(() => _loadingPaymentDetails = false);
+    }
   }
 
   void _startBillingCountdown(DateTime dueTime) {
@@ -58,9 +87,6 @@ class _ShopkeeperBillingScreenState extends State<ShopkeeperBillingScreen> {
       _remainingTime = remaining.isNegative ? Duration.zero : remaining;
     });
 
-    // FIX: if the grace period already expired before this screen even
-    // opened (shopkeeper was away), suspend right away instead of waiting
-    // for a tick that will never come from a fresh Timer.periodic.
     if (_remainingTime == Duration.zero) {
       _suspendShopIfNeeded();
       return;
@@ -74,24 +100,16 @@ class _ShopkeeperBillingScreenState extends State<ShopkeeperBillingScreen> {
       });
       if (_remainingTime == Duration.zero) {
         _countdownTimer?.cancel();
-        // FIX: this is the actual bug fix — previously only the local
-        // countdown display was updated here; the shop was never suspended
-        // unless _loadData() happened to run again afterwards.
         _suspendShopIfNeeded();
       }
     });
   }
 
-  // FIX: performs the real suspend write the moment the 3-minute grace
-  // period elapses, instead of relying on the shopkeeper reopening/
-  // refreshing the billing screen. Mirrors the exact same field writes
-  // _loadData()'s existing auto-suspend check already does, so it's not
-  // a new suspension path — just the missing trigger for the existing one.
   Future<void> _suspendShopIfNeeded() async {
     if (_suspending) return;
     final shopId = _shopData?['id'];
     if (shopId == null) return;
-    if ((_shopData?['status'] ?? '') == 'suspended') return; // already done
+    if ((_shopData?['status'] ?? '') == 'suspended') return;
 
     _suspending = true;
     try {
@@ -111,10 +129,7 @@ class _ShopkeeperBillingScreenState extends State<ShopkeeperBillingScreen> {
     }
   }
 
-  /// Option C Logic:
-  /// Unpaid orders = billingCycleId field nahi hai YA null hai
-  /// (Firestore isNull: true sirf tab kaam karta hai jab field exist kare)
-  /// Isliye manually filter karte hain.
+  // ─── Calculate Platform Fee = 5% of orderTotal ─────────────────────
   Future<void> _loadData() async {
     setState(() => _loading = true);
 
@@ -124,7 +139,6 @@ class _ShopkeeperBillingScreenState extends State<ShopkeeperBillingScreen> {
       return;
     }
 
-    // Step 1: Get shop
     final shopSnap = await _firestore
         .collection('shops')
         .where('owner_email', isEqualTo: user.email)
@@ -139,15 +153,13 @@ class _ShopkeeperBillingScreenState extends State<ShopkeeperBillingScreen> {
     final shopDoc = shopSnap.docs.first;
     final shopId = shopDoc.id;
 
-    // Step 2: Fetch ALL orders for this shop
-    // Then filter: billingCycleId field missing OR null = unpaid orders
+    // Fetch all delivered orders for this shop
     final allOrdersSnap = await _firestore
         .collection('orders')
         .where('shopId', isEqualTo: shopId)
         .get();
 
-    // Option C: sirf woh orders count karo jinka billingCycleId null hai
-    // Yeh orders abhi kisi billing cycle mein nahi hain
+    // Filter: delivered orders with no billingCycleId (unpaid)
     final unpaidDocs = allOrdersSnap.docs.where((doc) {
       final data = doc.data();
       final isDelivered = (data['status'] ?? '') == 'delivered';
@@ -156,15 +168,37 @@ class _ShopkeeperBillingScreenState extends State<ShopkeeperBillingScreen> {
           data['billingCycleId'] == null);
     }).toList();
 
+    // ─── Calculate 5% from orderTotal ──────────────────────────────────
     int pendingFee = 0;
     for (final doc in unpaidDocs) {
       final data = doc.data();
-      final fee = ((data['platformFee'] ?? 0) as num).toInt();
-      pendingFee += fee;
+      
+      // Get order total from the order document
+      num? orderTotal;
+      
+      // Try different possible field names
+      if (data.containsKey('orderTotal')) {
+        orderTotal = (data['orderTotal'] as num?)?.toDouble();
+      } else if (data.containsKey('totalAmount')) {
+        orderTotal = (data['totalAmount'] as num?)?.toDouble();
+      } else if (data.containsKey('grandTotal')) {
+        orderTotal = (data['grandTotal'] as num?)?.toDouble();
+      } else if (data.containsKey('amount')) {
+        orderTotal = (data['amount'] as num?)?.toDouble();
+      } else if (data.containsKey('total_amount')) {
+        orderTotal = (data['total_amount'] as num?)?.toDouble();
+      } else if (data.containsKey('order_amount')) {
+        orderTotal = (data['order_amount'] as num?)?.toDouble();
+      }
+      
+      // Platform Fee = 5% of order total
+      if (orderTotal != null && orderTotal > 0) {
+        final fee = (orderTotal * 0.05).toInt();
+        pendingFee += fee;
+      }
     }
 
-    // Step 3: Check for active billing cycle (pending_verification or rejected)
-    // Option C mein billing cycle = billing collection ka document
+    // Check for active billing cycle
     final activeBillingSnap = await _firestore
         .collection('billing')
         .where('shopId', isEqualTo: shopId)
@@ -174,19 +208,13 @@ class _ShopkeeperBillingScreenState extends State<ShopkeeperBillingScreen> {
 
     Map<String, dynamic>? activeBillingData;
     String? activeBillingDocId;
-
-    // FIX: track current shop status from this fresh read so the
-    // auto-suspend check below never re-writes if it's already suspended.
     String currentShopStatus = (shopDoc.data()['status'] ?? 'verified') as String;
 
     if (activeBillingSnap.docs.isNotEmpty) {
       activeBillingDocId = activeBillingSnap.docs.first.id;
       activeBillingData = activeBillingSnap.docs.first.data();
 
-      // Agar rejected cycle hai aur naye orders aa gaye hain
-      // toh total fee update karo (rejected + new unpaid)
-      // NOTE: Rejected cycle ke orders dobara billingCycleId null ho jaate hain
-      // isliye unpaidDocs mein woh bhi shamil ho jaate hain
+      // Update stored fee if different
       final storedFee =
           ((activeBillingData['total_platform_fee'] ?? 0) as num).toInt();
       if (pendingFee != storedFee) {
@@ -198,16 +226,12 @@ class _ShopkeeperBillingScreenState extends State<ShopkeeperBillingScreen> {
         };
       }
 
-      // ── AUTO SUSPEND CHECK (safety fallback — kept as-is) ──────────
-      // Agar billing rejected hai aur 3 min grace period expire ho gayi
+      // Auto suspend check
       if (activeBillingData['payment_status'] == 'rejected') {
         final dueTime = activeBillingData['due_time'];
         if (dueTime != null) {
           final dueDate = (dueTime as Timestamp).toDate();
-          // FIX: only write if not already suspended — avoids a redundant
-          // write every time this screen loads after expiry.
           if (DateTime.now().isAfter(dueDate) && currentShopStatus != 'suspended') {
-            // 3 min complete — shop suspend karo
             await _firestore.collection('shops').doc(shopId).update({
               'status': 'suspended',
               'warningActive': false,
@@ -224,17 +248,13 @@ class _ShopkeeperBillingScreenState extends State<ShopkeeperBillingScreen> {
         'pending_fee': pendingFee,
         'unpaid_order_count': unpaidDocs.length,
         ...shopDoc.data(),
-        'status': currentShopStatus, // FIX: reflect any suspend applied above
+        'status': currentShopStatus,
       };
       _activeBillingData = activeBillingData;
       _activeBillingDocId = activeBillingDocId;
       _loading = false;
     });
 
-    // ── Countdown start karo agar rejected + due_time maujood hai ──
-    // FIX: this also now covers cancellation — if payment_status moved to
-    // pending_verification (receipt resubmitted) or paid, the else branch
-    // cancels any running countdown from a previous rejection.
     if (activeBillingData != null &&
         activeBillingData['payment_status'] == 'rejected' &&
         currentShopStatus != 'suspended') {
@@ -304,6 +324,11 @@ class _ShopkeeperBillingScreenState extends State<ShopkeeperBillingScreen> {
       appBar: AppBar(
         backgroundColor: kNavy,
         elevation: 0,
+        // FIX: back arrow was rendering black — made explicit and white.
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+        ),
         title: const Text('Billing Dashboard',
             style: TextStyle(
                 color: Colors.white,
@@ -313,12 +338,18 @@ class _ShopkeeperBillingScreenState extends State<ShopkeeperBillingScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh, color: Colors.white),
-            onPressed: _loadData,
+            onPressed: () {
+              _loadData();
+              _loadAdminPaymentDetails();
+            },
           )
         ],
       ),
       body: RefreshIndicator(
-        onRefresh: _loadData,
+        onRefresh: () async {
+          await _loadData();
+          await _loadAdminPaymentDetails();
+        },
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.all(16),
@@ -327,7 +358,6 @@ class _ShopkeeperBillingScreenState extends State<ShopkeeperBillingScreen> {
             children: [
               _buildShopHeader(),
               const SizedBox(height: 16),
-              // Option C: Rejected hone par naye orders bhi include ho jaate hain
               if (fee > 0 && payStatus == 'rejected')
                 _buildWarningBanner(isRejected: true),
               if (fee > 0 && payStatus == 'pending_verification')
@@ -340,6 +370,9 @@ class _ShopkeeperBillingScreenState extends State<ShopkeeperBillingScreen> {
               const SizedBox(height: 16),
               _buildSummaryGrid(fee, orderCount, monthLabel, payStatus),
               const SizedBox(height: 20),
+              // ─── NEW: Admin Payment Details Card ────────────────────
+              _buildAdminPaymentDetailsCard(),
+              const SizedBox(height: 20),
               _buildQuickActions(context, fee),
               const SizedBox(height: 20),
               _buildReminderSection(),
@@ -348,7 +381,8 @@ class _ShopkeeperBillingScreenState extends State<ShopkeeperBillingScreen> {
           ),
         ),
       ),
-      bottomNavigationBar: _buildBottomNav(context),
+      // FIX: bottom nav bar removed per request. The rest of the screen's
+      // logic (data loading, countdown, suspend flow, actions) is untouched.
     );
   }
 
@@ -430,7 +464,6 @@ class _ShopkeeperBillingScreenState extends State<ShopkeeperBillingScreen> {
             ? Icons.hourglass_top_outlined
             : Icons.timer_outlined;
 
-    // ── Rejection ke liye countdown string ──
     final bool expired = _remainingTime == Duration.zero && isRejected;
     final mins = _remainingTime.inMinutes;
     final secs = _remainingTime.inSeconds % 60;
@@ -471,7 +504,6 @@ class _ShopkeeperBillingScreenState extends State<ShopkeeperBillingScreen> {
                   fontWeight: FontWeight.w500),
             ),
           ),
-          // ── Live countdown clock (sirf rejected pe) ──────────────
           if (isRejected) ...[
             const SizedBox(width: 10),
             Container(
@@ -570,9 +602,15 @@ class _ShopkeeperBillingScreenState extends State<ShopkeeperBillingScreen> {
     );
   }
 
+  // ─── UPDATED: Shows "Platform Fee (5%)" ──────────────────────────
+  // FIX: grid cards were overflowing (~5.7px) when a subtitle line was
+  // present, because the fixed childAspectRatio didn't leave enough
+  // vertical room for icon + value + title + subtitle. Lowered the
+  // aspect ratio slightly (taller cells) and swapped the inner
+  // spaceBetween layout for a tight, top-aligned Column so the content
+  // only takes the height it actually needs — no more, no less.
   Widget _buildSummaryGrid(
       int fee, int orderCount, String monthLabel, String payStatus) {
-    // Option C: payStatus values = pending_verification, rejected, paid
     String payStatusDisplay;
     Color payStatusColor;
 
@@ -595,10 +633,11 @@ class _ShopkeeperBillingScreenState extends State<ShopkeeperBillingScreen> {
 
     final cards = [
       {
-        'title': 'Pending Platform Fee',
-        'value': fee == 0 ? 'Rs. 0 (Clear)' : 'Rs. $fee',
+        'title': 'Platform Fee (5%)',
+        'value': fee == 0 ? 'Rs. 0' : 'Rs. $fee',
         'icon': Icons.account_balance_wallet_outlined,
         'color': fee == 0 ? Colors.green : kOrange,
+        'subtitle': fee > 0 ? '5% of order total' : 'No pending orders',
       },
       {
         'title': 'Unpaid Orders',
@@ -628,7 +667,7 @@ class _ShopkeeperBillingScreenState extends State<ShopkeeperBillingScreen> {
         crossAxisCount: 2,
         crossAxisSpacing: 12,
         mainAxisSpacing: 12,
-        childAspectRatio: 1.5,
+        childAspectRatio: 1.25, // was 1.5 — taller cells so 3-line cards fit
       ),
       itemCount: cards.length,
       itemBuilder: (_, i) {
@@ -647,7 +686,8 @@ class _ShopkeeperBillingScreenState extends State<ShopkeeperBillingScreen> {
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            mainAxisAlignment: MainAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
             children: [
               Container(
                 padding: const EdgeInsets.all(7),
@@ -658,23 +698,207 @@ class _ShopkeeperBillingScreenState extends State<ShopkeeperBillingScreen> {
                 child: Icon(c['icon'] as IconData,
                     color: c['color'] as Color, size: 20),
               ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(c['value'] as String,
-                      style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                          color: c['color'] as Color)),
-                  Text(c['title'] as String,
-                      style: const TextStyle(
-                          fontSize: 11, color: Colors.grey)),
-                ],
-              ),
+              const SizedBox(height: 8),
+              Text(c['value'] as String,
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                      color: c['color'] as Color)),
+              Text(c['title'] as String,
+                  style: const TextStyle(
+                      fontSize: 11, color: Colors.grey)),
+              if (c.containsKey('subtitle') && c['subtitle'] != null)
+                Text(c['subtitle'] as String,
+                    style: const TextStyle(
+                        fontSize: 9, color: Colors.grey)),
             ],
           ),
         );
       },
+    );
+  }
+
+  // ─── NEW: Admin Payment Details Card ──────────────────────────────
+  Widget _buildAdminPaymentDetailsCard() {
+    // Show loading indicator while fetching payment details
+    if (_loadingPaymentDetails) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+                color: Colors.black.withOpacity(0.06),
+                blurRadius: 10,
+                offset: const Offset(0, 3))
+          ],
+        ),
+        child: const Row(
+          children: [
+            SizedBox(
+              height: 20,
+              width: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            SizedBox(width: 12),
+            Text(
+              'Loading payment details...',
+              style: TextStyle(fontSize: 13, color: Colors.grey),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Check if any payment details exist
+    final data = _adminPaymentDetails;
+    if (data == null || data.values.every((v) => v == null || v == '')) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+                color: Colors.black.withOpacity(0.06),
+                blurRadius: 10,
+                offset: const Offset(0, 3))
+          ],
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.info_outline, color: Colors.grey.shade400, size: 20),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'No payment details available. Please contact admin.',
+                style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Build list of available payment details
+    final List<Widget> details = [];
+    
+    void addDetail(String label, String? value, IconData icon) {
+      if (value != null && value.isNotEmpty) {
+        details.add(
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(icon, color: kOrange, size: 14),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 95,
+                  child: Text(
+                    label,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    value,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF0D1B3E),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
+    }
+
+    addDetail('Account Holder', data['accountHolderName'] as String?, Icons.person_outline);
+    addDetail('Bank Name', data['bankName'] as String?, Icons.business_outlined);
+    addDetail('Account Number', data['accountNumber'] as String?, Icons.numbers_outlined);
+    addDetail('IBAN', data['iban'] as String?, Icons.code_outlined);
+    addDetail('JazzCash', data['jazzcashNumber'] as String?, Icons.phone_android_outlined);
+    addDetail('Easypaisa', data['easypaisaNumber'] as String?, Icons.phone_iphone_outlined);
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.06),
+              blurRadius: 10,
+              offset: const Offset(0, 3))
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: kOrange.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(
+                  Icons.account_balance_wallet_outlined,
+                  color: kOrange,
+                  size: 18,
+                ),
+              ),
+              const SizedBox(width: 10),
+              const Text(
+                'Admin Payment Account',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF0D1B3E),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          const Divider(height: 1),
+          const SizedBox(height: 10),
+          ...details,
+          // Show hint that these details are from admin
+          Container(
+            margin: const EdgeInsets.only(top: 8),
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade50,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.info_outline, color: Colors.grey.shade500, size: 14),
+                const SizedBox(width: 6),
+                Text(
+                  'Please send payment to the above account',
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: Colors.grey.shade500,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -714,7 +938,6 @@ class _ShopkeeperBillingScreenState extends State<ShopkeeperBillingScreen> {
                     ));
                     return;
                   }
-                  // Option C: Under Review mein nahi ja sakte
                   final payStatus =
                       (_activeBillingData?['payment_status'] ?? '') as String;
                   if (payStatus == 'pending_verification') {
@@ -818,19 +1041,19 @@ class _ShopkeeperBillingScreenState extends State<ShopkeeperBillingScreen> {
                   color: Color(0xFF0D1B3E))),
           const SizedBox(height: 12),
           _reminderItem(Icons.shopping_bag_outlined,
-              'Platform fee remains pending after each completed order'),
+              'NearBuy earns 5% commission from each customer order'),
           _reminderItem(Icons.account_balance_wallet_outlined,
-              'All unpaid orders keep accumulating'),
+              'Platform fee accumulates from all delivered orders'),
           _reminderItem(Icons.upload_file,
-              '"Press "Pay Now" — all unpaid orders get locked in one batch'),
+              'Press "Upload Receipt" to pay all pending fees in one batch'),
           _reminderItem(Icons.lock_outline,
               'Locked orders get billingCycleId set — they won\'t be counted again'),
           _reminderItem(Icons.admin_panel_settings,
-              'Admin verifies the receipt'),
+              'Admin verifies the receipt payment'),
           _reminderItem(Icons.check_circle_outline,
-              'After verification those orders become "paid" — new cycle begins'),
+              'After verification, orders become "paid" — new cycle begins'),
           _reminderItem(Icons.refresh,
-              'On rejection those orders go back to "unpaid" — included in next receipt with new orders'),
+              'On rejection, orders go back to "unpaid" and get included again'),
         ],
       ),
     );
@@ -848,38 +1071,6 @@ class _ShopkeeperBillingScreenState extends State<ShopkeeperBillingScreen> {
               child: Text(text,
                   style: const TextStyle(
                       fontSize: 13, color: Colors.black87))),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildBottomNav(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withOpacity(0.08),
-              blurRadius: 12,
-              offset: const Offset(0, -3))
-        ],
-      ),
-      child: BottomNavigationBar(
-        backgroundColor: Colors.white,
-        selectedItemColor: kOrange,
-        unselectedItemColor: Colors.grey,
-        type: BottomNavigationBarType.fixed,
-        currentIndex: 2,
-        items: const [
-          BottomNavigationBarItem(
-              icon: Icon(Icons.home_outlined), label: 'Home'),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.receipt_outlined), label: 'Orders'),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.account_balance_wallet_outlined),
-              label: 'Billing'),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.person_outline), label: 'Profile'),
         ],
       ),
     );

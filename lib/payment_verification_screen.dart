@@ -12,6 +12,27 @@ class PaymentVerificationScreen extends StatelessWidget {
   static const Color kNavy = Color(0xFF0D1B3E);
   static const Color kNavyCard = Color(0xFF112240);
 
+  // ── Helper: Get month name from DateTime ──────────────────────
+  String _getMonthName(DateTime date) {
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    ];
+    return months[date.month - 1];
+  }
+
+  // ── Helper: Format date with dynamic month ────────────────────
+  String _formatDate(dynamic timestamp) {
+    if (timestamp == null || timestamp is! Timestamp) return '';
+    
+    final dt = timestamp.toDate();
+    final hour = dt.hour > 12 ? dt.hour - 12 : dt.hour;
+    final amPm = dt.hour >= 12 ? 'PM' : 'AM';
+    final month = _getMonthName(dt);
+    
+    return '${dt.day} $month ${dt.year} • ${hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')} $amPm';
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -43,7 +64,7 @@ class PaymentVerificationScreen extends StatelessWidget {
       body: StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance
             .collection('billing')
-            .snapshots(), // fetch all to show pending, approved, rejected counts
+            .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
@@ -298,15 +319,10 @@ class PaymentVerificationScreen extends StatelessWidget {
                 'Unknown Shop'
             : 'Loading...';
 
-        String dateStr = '';
+        // ── Use helper function for date formatting ──
+        final dateStr = _formatDate(submittedAt);
+        
         String orderIdStr = data['order_id'] ?? '#ORD${docId.substring(0, 5).toUpperCase()}';
-        if (submittedAt != null && submittedAt is Timestamp) {
-          final dt = submittedAt.toDate();
-          final hour = dt.hour > 12 ? dt.hour - 12 : dt.hour;
-          final amPm = dt.hour >= 12 ? 'PM' : 'AM';
-          dateStr =
-              '${dt.day} May ${dt.year} • ${hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')} $amPm';
-        }
 
         return Container(
           margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
@@ -414,16 +430,12 @@ class PaymentVerificationScreen extends StatelessWidget {
             : 'Loading...';
 
         final verifiedAt = data['verified_at'] ?? data['submitted_at'];
-        String dateStr = '';
+        
+        // ── Use helper function for date formatting ──
+        final dateStr = _formatDate(verifiedAt);
+        
         String orderIdStr = data['order_id'] ??
             '#ORD${shopId.substring(0, Math.min(5, shopId.length)).toUpperCase()}';
-        if (verifiedAt != null && verifiedAt is Timestamp) {
-          final dt = verifiedAt.toDate();
-          final hour = dt.hour > 12 ? dt.hour - 12 : dt.hour;
-          final amPm = dt.hour >= 12 ? 'PM' : 'AM';
-          dateStr =
-              '${dt.day} May ${dt.year} • ${hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')} $amPm';
-        }
 
         return Container(
           margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),

@@ -1110,6 +1110,15 @@ class _AddProductPageState extends State<AddProductPage>
                               focusNode: _nameFocusNode,
                               textCapitalization: TextCapitalization.words,
                               maxLength: 50,
+                              // ✅ FIX — hides Flutter's built-in counter so
+                              // only the custom counter below is shown
+                              // (previously both were rendering, causing the
+                              // duplicated "0/50" text in the UI).
+                              buildCounter: (context,
+                                      {required currentLength,
+                                      required isFocused,
+                                      maxLength}) =>
+                                  null,
                               decoration: _inputDec(
                                 label: 'Product Name *',
                                 icon: Icons.label_outline,
@@ -1169,6 +1178,15 @@ class _AddProductPageState extends State<AddProductPage>
                               focusNode: _descFocusNode,
                               maxLines: 3,
                               maxLength: 200,
+                              // ✅ FIX — hides Flutter's built-in counter so
+                              // only the custom counter below is shown
+                              // (previously both were rendering, causing the
+                              // duplicated "0/200" text in the UI).
+                              buildCounter: (context,
+                                      {required currentLength,
+                                      required isFocused,
+                                      maxLength}) =>
+                                  null,
                               decoration: _inputDec(
                                 label: 'Description (optional)',
                                 icon: Icons.description_outlined,
