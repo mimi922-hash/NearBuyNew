@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/services.dart';
 
 class AdminPaymentDetailsScreen extends StatefulWidget {
   const AdminPaymentDetailsScreen({super.key});
@@ -116,13 +117,20 @@ class _AdminPaymentDetailsScreenState
     setState(() => _isSaving = true);
 
     try {
+      // Clean and store the 11-digit mobile numbers
+      String cleanJazzcash = _cleanMobileNumber(_jazzcashController.text);
+      String cleanEasypaisa = _cleanMobileNumber(_easypaisaController.text);
+      
+      // Clean IBAN by removing spaces
+      String cleanIban = _ibanController.text.trim().toUpperCase().replaceAll(RegExp(r'\s+'), '');
+
       final data = {
         'accountHolderName': _accountHolderController.text.trim(),
         'bankName': _bankNameController.text.trim(),
         'accountNumber': _accountNumberController.text.trim(),
-        'iban': _ibanController.text.trim().toUpperCase(),
-        'jazzcashNumber': _jazzcashController.text.trim(),
-        'easypaisaNumber': _easypaisaController.text.trim(),
+        'iban': cleanIban,
+        'jazzcashNumber': cleanJazzcash,
+        'easypaisaNumber': cleanEasypaisa,
         'updatedAt': FieldValue.serverTimestamp(),
         'updatedBy': _auth.currentUser?.uid ?? 'unknown',
       };
@@ -140,16 +148,27 @@ class _AdminPaymentDetailsScreenState
     }
   }
 
+  // ── Helper to clean mobile number ──────────────────────────────
+  String _cleanMobileNumber(String value) {
+    return value.trim().replaceAll(RegExp(r'[\s\-]'), '');
+  }
+
   // ── Validators ──────────────────────────────────────────────────
   String? _validateAccountHolder(String? value) {
     if (value == null || value.trim().isEmpty) {
       return 'Account holder name is required';
     }
-    if (value.trim().length > 50) {
+    final trimmed = value.trim();
+    if (trimmed.length > 50) {
       return 'Maximum 50 characters allowed';
     }
-    if (!RegExp(r'^[a-zA-Z\s]+$').hasMatch(value.trim())) {
-      return 'Only letters and spaces allowed';
+    // Allow letters, spaces, and apostrophes for names
+    if (!RegExp(r"^[a-zA-Z\s']+$").hasMatch(trimmed)) {
+      return 'Only letters, spaces, and apostrophes allowed';
+    }
+    // Prevent multiple consecutive spaces
+    if (RegExp(r'\s{2,}').hasMatch(trimmed)) {
+      return 'Remove extra spaces between words';
     }
     return null;
   }
@@ -158,8 +177,17 @@ class _AdminPaymentDetailsScreenState
     if (value == null || value.trim().isEmpty) {
       return 'Bank name is required';
     }
-    if (value.trim().length > 40) {
+    final trimmed = value.trim();
+    if (trimmed.length > 40) {
       return 'Maximum 40 characters allowed';
+    }
+    // Allow letters, spaces, dots, ampersand, and hyphen
+    if (!RegExp(r"^[a-zA-Z\s\.&'-]+$").hasMatch(trimmed)) {
+      return 'Only letters, spaces, and valid characters allowed';
+    }
+    // Prevent multiple consecutive spaces
+    if (RegExp(r'\s{2,}').hasMatch(trimmed)) {
+      return 'Remove extra spaces between words';
     }
     return null;
   }
@@ -168,16 +196,46 @@ class _AdminPaymentDetailsScreenState
     if (value == null || value.trim().isEmpty) {
       return 'Account number is required';
     }
-    if (!RegExp(r'^\d+$').hasMatch(value.trim())) {
+    final trimmed = value.trim();
+    if (!RegExp(r'^\d+$').hasMatch(trimmed)) {
       return 'Only digits allowed';
     }
-    if (value.trim().length > 24) {
+    if (trimmed.length > 24) {
       return 'Maximum 24 digits allowed';
+    }
+    if (trimmed.length < 6) {
+      return 'Minimum 6 digits required';
     }
     return null;
   }
 
-  // ── Improved IBAN Validator for Pakistan ──────────────────────
+  // ── IBAN MOD-97 Checksum Validation ────────────────────────────
+  bool _validateIbanChecksum(String iban) {
+    // Move first 4 characters to the end and convert letters to numbers
+    String rearranged = iban.substring(4) + iban.substring(0, 4);
+    String numericIban = '';
+    
+    for (int i = 0; i < rearranged.length; i++) {
+      String char = rearranged[i];
+      if (RegExp(r'^[A-Z]$').hasMatch(char)) {
+        // A=10, B=11, ..., Z=35
+        int value = char.codeUnitAt(0) - 55;
+        numericIban += value.toString();
+      } else {
+        numericIban += char;
+      }
+    }
+    
+    // Perform MOD-97 calculation
+    BigInt remainder = BigInt.zero;
+    for (int i = 0; i < numericIban.length; i++) {
+      int digit = int.parse(numericIban[i]);
+      remainder = (remainder * BigInt.from(10) + BigInt.from(digit)) % BigInt.from(97);
+    }
+    
+    return remainder == BigInt.one;
+  }
+
   String? _validateIBAN(String? value) {
     if (value == null || value.trim().isEmpty) {
       return null; // Optional field
@@ -197,8 +255,7 @@ class _AdminPaymentDetailsScreenState
     }
     
     // Check next 2 characters are digits
-    String countryCode = iban.substring(0, 2); // PK
-    String checkDigits = iban.substring(2, 4); // 2 digits
+    String checkDigits = iban.substring(2, 4);
     if (!RegExp(r'^[0-9]{2}$').hasMatch(checkDigits)) {
       return 'Characters 3-4 must be digits (check digits)';
     }
@@ -215,6 +272,11 @@ class _AdminPaymentDetailsScreenState
       return 'Remaining 16 characters must be letters or numbers';
     }
     
+    // Perform MOD-97 checksum validation
+    if (!_validateIbanChecksum(iban)) {
+      return 'Invalid IBAN checksum. Please verify the IBAN number';
+    }
+    
     return null;
   }
 
@@ -224,7 +286,7 @@ class _AdminPaymentDetailsScreenState
       return null; // Optional field
     }
     
-    // Remove spaces, dashes, and special characters
+    // Remove spaces and dashes
     String number = value.trim().replaceAll(RegExp(r'[\s\-]'), '');
     
     // Check if only digits
@@ -234,12 +296,20 @@ class _AdminPaymentDetailsScreenState
     
     // Must be 11 digits
     if (number.length != 11) {
-      return 'Must be exactly 11 digits (e.g., 03XX-XXXXXXX)';
+      return 'Must be exactly 11 digits (e.g., 0312-3456789)';
     }
     
     // Must start with '03'
     if (!number.startsWith('03')) {
       return 'Must start with 03';
+    }
+    
+    // Ensure second digit is valid (0-9)
+    if (number.length >= 3) {
+      String prefix = number.substring(0, 3);
+      if (!RegExp(r'^03[0-9]$').hasMatch(prefix)) {
+        return 'Invalid mobile prefix';
+      }
     }
     
     return null;
@@ -308,6 +378,7 @@ class _AdminPaymentDetailsScreenState
     bool isRequired = true,
     bool autoCapitalize = false,
     bool formatMobile = false,
+    List<TextInputFormatter>? inputFormatters,
   }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
@@ -321,6 +392,7 @@ class _AdminPaymentDetailsScreenState
         textCapitalization: autoCapitalize
             ? TextCapitalization.words
             : TextCapitalization.none,
+        inputFormatters: inputFormatters,
         onFieldSubmitted: (_) {
           if (textInputAction == TextInputAction.next) {
             FocusScope.of(context).nextFocus();
@@ -330,7 +402,7 @@ class _AdminPaymentDetailsScreenState
           // Format mobile numbers as user types
           if (formatMobile && value.isNotEmpty) {
             String cleaned = value.replaceAll(RegExp(r'[\s\-]'), '');
-            if (cleaned.length >= 4) {
+            if (cleaned.length >= 4 && cleaned.length <= 11) {
               String formatted = '${cleaned.substring(0, 4)}-${cleaned.substring(4)}';
               if (controller.text != formatted) {
                 controller.value = TextEditingValue(
@@ -339,6 +411,10 @@ class _AdminPaymentDetailsScreenState
                 );
               }
             }
+          }
+          // Auto-capitalize for name fields
+          if (autoCapitalize && controller.text.isNotEmpty) {
+            // This is handled by textCapitalization: TextCapitalization.words
           }
         },
         decoration: InputDecoration(
@@ -440,7 +516,7 @@ class _AdminPaymentDetailsScreenState
           ),
           const SizedBox(height: 6),
           Text(
-            'PK 12 HABB 1234567890123456',
+            'PK12 HABB 1234 5678 9012 3456',
             style: TextStyle(
               color: _white.withOpacity(0.7),
               fontSize: 12,
@@ -449,7 +525,7 @@ class _AdminPaymentDetailsScreenState
           ),
           const SizedBox(height: 4),
           Text(
-            '• Starts with PK\n• 2 check digits\n• 4 letter bank code\n• 16 alphanumeric characters',
+            '• Starts with PK\n• 2 check digits\n• 4 letter bank code\n• 16 alphanumeric characters\n• MOD-97 checksum validation',
             style: TextStyle(
               color: _white.withOpacity(0.5),
               fontSize: 11,
@@ -555,15 +631,28 @@ class _AdminPaymentDetailsScreenState
                         icon: Icons.person_outline,
                         validator: _validateAccountHolder,
                         autoCapitalize: true,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(
+                            RegExp(r"[a-zA-Z\s']"),
+                          ),
+                          FilteringTextInputFormatter.deny(RegExp(r'\s{2,}')),
+                        ],
                       ),
 
                       _buildTextField(
                         controller: _bankNameController,
                         focusNode: _bankNameFocus,
                         label: 'Bank Name',
-                        hint: 'e.g., HBL, UBL, MCB',
+                        hint: 'e.g., Habib Bank Limited',
                         icon: Icons.business_outlined,
                         validator: _validateBankName,
+                        autoCapitalize: true,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(
+                            RegExp(r"[a-zA-Z\s\.&'-]"),
+                          ),
+                          FilteringTextInputFormatter.deny(RegExp(r'\s{2,}')),
+                        ],
                       ),
 
                       _buildTextField(
@@ -575,6 +664,9 @@ class _AdminPaymentDetailsScreenState
                         validator: _validateAccountNumber,
                         keyboardType: TextInputType.number,
                         maxLength: 24,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                        ],
                       ),
 
                       // ── IBAN Field with format helper ──────────
@@ -582,11 +674,16 @@ class _AdminPaymentDetailsScreenState
                         controller: _ibanController,
                         focusNode: _ibanFocus,
                         label: 'IBAN (Optional)',
-                        hint: 'e.g., PK12HABB1234567890123456',
+                        hint: 'e.g., PK12 HABB 1234 5678 9012 3456',
                         icon: Icons.code_outlined,
                         validator: _validateIBAN,
                         keyboardType: TextInputType.text,
-                        maxLength: 24,
+                        maxLength: 30, // Allow spaces for formatting
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(
+                            RegExp(r'[a-zA-Z0-9\s]'),
+                          ),
+                        ],
                       ),
                       
                       _buildIbanHelper(),
@@ -607,6 +704,11 @@ class _AdminPaymentDetailsScreenState
                         keyboardType: TextInputType.phone,
                         maxLength: 12, // 11 digits + 1 dash
                         formatMobile: true,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(
+                            RegExp(r'[\d\-]'),
+                          ),
+                        ],
                       ),
 
                       _buildTextField(
@@ -619,6 +721,11 @@ class _AdminPaymentDetailsScreenState
                         keyboardType: TextInputType.phone,
                         maxLength: 12, // 11 digits + 1 dash
                         formatMobile: true,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(
+                            RegExp(r'[\d\-]'),
+                          ),
+                        ],
                       ),
 
                       const SizedBox(height: 24),

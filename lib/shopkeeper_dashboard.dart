@@ -42,6 +42,9 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
   // ── Revenue state ─────────────────────────────────────────────────
   double _totalRevenue = 0.0;
 
+  // ⭐ FIX: Stream subscription for shop data
+  StreamSubscription<QuerySnapshot>? _shopStreamSubscription;
+
   StreamSubscription<DocumentSnapshot>? _billingSubscription;
   StreamSubscription<DocumentSnapshot>? _shopLiveSubscription;
   StreamSubscription<DocumentSnapshot>? _userDocSubscription;
@@ -75,7 +78,9 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
         CurvedAnimation(parent: _animController, curve: Curves.easeOut);
     _animController.forward();
     _subscribeToUserDoc();
-    _checkShop();
+    
+    // ⭐ FIX: Use stream instead of one-time fetch
+    _subscribeToShop();
   }
 
   @override
@@ -84,6 +89,7 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
     _billingSubscription?.cancel();
     _shopLiveSubscription?.cancel();
     _userDocSubscription?.cancel();
+    _shopStreamSubscription?.cancel(); // ⭐ Added
     _countdownTimer?.cancel();
     _animController.dispose();
     super.dispose();
@@ -111,6 +117,67 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
           _shopkeeperName =
               user!.displayName ?? user!.email?.split('@').first ?? 'Shopkeeper';
         });
+      }
+    });
+  }
+
+  // ⭐ FIX: New method - Stream subscription for shop data
+  void _subscribeToShop() {
+    if (user == null) {
+      setState(() => _loading = false);
+      return;
+    }
+
+    _shopStreamSubscription?.cancel();
+    _shopStreamSubscription = FirebaseFirestore.instance
+        .collection('shops')
+        .where('owner_email', isEqualTo: user?.email)
+        .limit(1)
+        .snapshots()
+        .listen((snapshot) {
+      if (!mounted) return;
+
+      if (snapshot.docs.isNotEmpty) {
+        final doc = snapshot.docs.first;
+        final data = doc.data() as Map<String, dynamic>;
+        final shopId = doc.id;
+        final status = data['status'] ?? 'pending';
+
+        setState(() {
+          _shopData = data;
+          _shopId = shopId;
+          _billingStatus = status == 'suspended' ? 'suspended' : 'active';
+          _loading = false;
+        });
+
+        // Subscribe to live updates for this shop
+        _subscribeToShopLive(shopId);
+
+        // Only subscribe to features if shop is verified
+        if (status == 'verified') {
+          _subscribeToPendingOrders(shopId);
+          _subscribeToBillingStatus(shopId);
+          _fetchTotalRevenue(shopId);
+        } else {
+          // Cancel subscriptions if not verified
+          _ordersSubscription?.cancel();
+          _billingSubscription?.cancel();
+        }
+      } else {
+        // No shop found
+        setState(() {
+          _shopData = null;
+          _shopId = null;
+          _loading = false;
+          _billingStatus = 'active';
+        });
+        _ordersSubscription?.cancel();
+        _billingSubscription?.cancel();
+      }
+    }, onError: (error) {
+      debugPrint('Shop stream error: $error');
+      if (mounted) {
+        setState(() => _loading = false);
       }
     });
   }
@@ -241,26 +308,7 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
     }
   }
 
-  void _checkShop() async {
-    final snapshot = await FirebaseFirestore.instance
-        .collection('shops')
-        .where('owner_email', isEqualTo: user?.email)
-        .limit(1)
-        .get();
-    if (snapshot.docs.isNotEmpty) {
-      _shopData = snapshot.docs.first.data();
-      _shopId = snapshot.docs.first.id;
-      final initialShopStatus = _shopData!['status'] ?? 'verified';
-      _billingStatus = initialShopStatus == 'suspended' ? 'suspended' : 'active';
-      _subscribeToShopLive(_shopId!);
-      if (_shopData!['status'] == 'verified') {
-        _subscribeToPendingOrders(_shopId!);
-        _subscribeToBillingStatus(_shopId!);
-        _fetchTotalRevenue(_shopId!);
-      }
-    }
-    setState(() => _loading = false);
-  }
+  // ⭐ FIX: Removed _checkShop() - replaced with _subscribeToShop()
 
   void _clearNotification() {
     if (_shopId != null) {
@@ -349,8 +397,205 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
             builder: (_) => ShopTimingPage(shopId: _shopId!)));
   }
 
+  // ── RE-REGISTER SHOP ──────────────────────────────────────────────
+  Future<void> _reRegisterShop() async {
+    // First, delete the old rejected shop document
+    if (_shopId != null) {
+      try {
+        await FirebaseFirestore.instance
+            .collection('shops')
+            .doc(_shopId!)
+            .delete();
+        setState(() {
+          _shopId = null;
+          _shopData = null;
+        });
+      } catch (e) {
+        debugPrint('Error deleting old rejected shop: $e');
+      }
+    }
+    
+    // Navigate to shop registration page
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const ShopRegistrationPage(),
+      ),
+    );
+    
+    // ⭐ FIX: After re-registration, stream will auto-update
+    // No need to call _checkShop() - stream handles it automatically
+    if (result == true) {
+      if (mounted) {
+        _showSnack('Shop registered successfully! Waiting for admin approval.', accentOrange);
+      }
+    }
+  }
+
+  // ── REJECTED STATE UI ─────────────────────────────────────────────
+  Widget _buildRejectedState() {
+    final rejectionReason = _shopData?['rejection_reason'] ?? '';
+    final rejectionDate = _shopData?['rejected_at'] as Timestamp?;
+    
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            // ── Icon ──────────────────────────────────────────────
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: redLight,
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: accentRed.withOpacity(0.3),
+                  width: 2,
+                ),
+              ),
+              child: const Icon(
+                Icons.cancel_outlined,
+                color: accentRed,
+                size: 60,
+              ),
+            ),
+            
+            const SizedBox(height: 24),
+            
+            // ── Title ─────────────────────────────────────────────
+            const Text(
+              'Shop Registration Rejected',
+              style: TextStyle(
+                color: primaryNavy,
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            
+            const SizedBox(height: 12),
+            
+            // ── Subtitle ──────────────────────────────────────────
+            Text(
+              'Your shop registration has been reviewed and rejected by the admin.',
+              style: TextStyle(
+                color: Colors.grey.shade600,
+                fontSize: 14,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            
+            const SizedBox(height: 20),
+            
+            // ── Rejection reason card ────────────────────────────
+            if (rejectionReason.isNotEmpty) ...[
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: orangeLight,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: accentOrange.withOpacity(0.2),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.info_outline,
+                          color: accentOrange,
+                          size: 16,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Rejection Reason',
+                          style: TextStyle(
+                            color: accentOrange,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      rejectionReason,
+                      style: const TextStyle(
+                        color: primaryNavy,
+                        fontSize: 14,
+                      ),
+                    ),
+                    if (rejectionDate != null) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        'Rejected on: ${_formatDate(rejectionDate.toDate())}',
+                        style: TextStyle(
+                          color: Colors.grey.shade500,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+            ],
+            
+            // ── Action buttons ─────────────────────────────────────
+            SizedBox(
+              width: double.infinity,
+              height: 52,
+              child: ElevatedButton.icon(
+                onPressed: _reRegisterShop,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: accentOrange,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                icon: const Icon(
+                  Icons.add_business_outlined,
+                  color: Colors.white,
+                  size: 20,
+                ),
+                label: const Text(
+                  'Register Shop Again',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                  ),
+                ),
+              ),
+            ),
+            
+            const SizedBox(height: 12),
+            
+            // ── Help text ─────────────────────────────────────────
+            Text(
+              'Your new registration will be reviewed by the admin.',
+              style: TextStyle(
+                color: Colors.grey.shade500,
+                fontSize: 12,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _formatDate(DateTime date) {
+    return '${date.day}/${date.month}/${date.year}';
+  }
+
   // ══════════════════════════════════════════════════════════════════
-  //  UI WIDGETS
+  //  UI WIDGETS (Original dashboard widgets - unchanged)
   // ══════════════════════════════════════════════════════════════════
 
   Widget _sectionLabel(String title, IconData icon) {
@@ -394,7 +639,6 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
     );
   }
 
-  // ── FIXED: GREETING HEADER with overflow protection ──────────────
   Widget _greetingHeader() {
     final shopStatus = _shopData?['status'] ?? '';
     final isVerified = shopStatus == 'verified';
@@ -429,7 +673,6 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Row: avatar + name + verified badge ──────────────
           Row(
             children: [
               GestureDetector(
@@ -467,7 +710,6 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Role chip
                     Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 6, vertical: 2),
@@ -555,7 +797,6 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
           Divider(color: Colors.white.withOpacity(0.12), height: 1),
           const SizedBox(height: 10),
 
-          // ── Detail rows with smaller text ───────────────────
           Row(
             children: [
               Expanded(
@@ -594,9 +835,7 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
               Icons.badge_outlined,
               'Reg: ${_shopData?['registration_no'] ?? '—'}'),
 
-          // ── Today timing row ──────────────────────────────────
-          if (shopHours != null && dayData != null) ...[
-            const SizedBox(height: 10),
+          if (shopHours != null && dayData != null) ...[            const SizedBox(height: 10),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
               decoration: BoxDecoration(
@@ -679,7 +918,6 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
     );
   }
 
-  // ── FIXED: STATS ROW with responsive chips ──────────────────────
   Widget _statsRow() {
     if (_shopId == null) return const SizedBox.shrink();
 
@@ -699,7 +937,6 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                 .length
             : 0;
         
-        // ── Calculate low stock (quantity > 0 and <= 5) ──
         final int lowStockCount = snapshot.hasData
             ? snapshot.data!.docs
                 .where((d) {
@@ -712,7 +949,6 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
 
         return Column(
           children: [
-            // ── FIXED: Responsive chips with smaller padding ──
             Row(children: [
               Expanded(
                 child: _statChip(
@@ -768,7 +1004,6 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
 
             const SizedBox(height: 10),
 
-            // ── Total Revenue box ─────────────────────────────
             Container(
               padding: const EdgeInsets.symmetric(
                   horizontal: 12, vertical: 10),
@@ -834,7 +1069,6 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
               ),
             ),
 
-            // ── Pending fee box ───────────────────────────────
             if ((_shopData?['pending_fee'] ?? 0) > 0) ...[
               const SizedBox(height: 10),
               GestureDetector(
@@ -900,7 +1134,6 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
               ),
             ],
 
-            // ── Out of stock box ──────────────────────────────
             if (outOfStock > 0) ...[
               const SizedBox(height: 10),
               Container(
@@ -971,7 +1204,6 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
     );
   }
 
-  // ── Payment status badge helper ───────────────────────────────────
   Widget _payStatusBadge() {
     final ps = (_billingPaymentStatus) as String;
     Color color;
@@ -1002,7 +1234,6 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
     );
   }
 
-  // ── FIXED: Stat chip with responsive sizing ──────────────────────
   Widget _statChip({
     required IconData icon,
     required String value,
@@ -1086,7 +1317,6 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
     );
   }
 
-  // ── Grace period countdown banner ─────────────────────────────────
   Widget _gracePeriodBanner() {
     if (_billingPaymentStatus != 'rejected') return const SizedBox.shrink();
     if (_remainingTime == Duration.zero && _graceDueTime == null) {
@@ -1200,7 +1430,6 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
     );
   }
 
-  // ── QUICK ACTIONS ────────────────────────────────────────────────────
   Widget _quickActions() {
     final qs = _shopData?['status'] ?? '';
     if (qs != 'verified' && qs != 'suspended') return const SizedBox.shrink();
@@ -1471,7 +1700,6 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
     );
   }
 
-  // ── FIXED: Product list with proper overflow handling ────────────
   Widget _productList() {
     if (_shopId == null) return const SizedBox.shrink();
     return StreamBuilder<QuerySnapshot>(
@@ -1654,7 +1882,6 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                             ),
                           ]),
                     ),
-                    // ── Edit button ──
                     GestureDetector(
                       onTap: () {
                         Navigator.push(
@@ -2067,6 +2294,7 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
               children: [
                 _drawerItem(
                     Icons.person_outline, 'My Profile', _openProfilePage),
+                // Only show shop-related items if shop is verified
                 if (_shopData?['status'] == 'verified') ...[
                   _drawerItem(Icons.shopping_bag_outlined, 'Orders', () {
                     Navigator.push(
@@ -2181,8 +2409,10 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
               child: RefreshIndicator(
                 color: accentOrange,
                 onRefresh: () async {
-                  _checkShop();
-                  if (_shopId != null) _fetchTotalRevenue(_shopId!);
+                  // ⭐ FIX: Stream handles auto-update, just refresh revenue
+                  if (_shopId != null && _shopData?['status'] == 'verified') {
+                    await _fetchTotalRevenue(_shopId!);
+                  }
                 },
                 child: SingleChildScrollView(
                   physics: const AlwaysScrollableScrollPhysics(),
@@ -2190,27 +2420,33 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
                   child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _greetingHeader(),
-                        const SizedBox(height: 12),
-                        _suspendedBanner(),
-                        _gracePeriodBanner(),
-                        _notificationBanner(),
-                        if (_shopData?['status'] == 'verified') ...[
-                          _statsRow(),
+                        // ── Check shop status ──────────────────────
+                        if (_shopData?['status'] == 'rejected') ...[
+                          _buildRejectedState(),
+                        ] else ...[
+                          // ── Normal dashboard ────────────────────
+                          _greetingHeader(),
                           const SizedBox(height: 12),
-                        ],
-                        _sectionLabel(
-                            'My Shop', Icons.storefront_outlined),
-                        _shopStatusSection(),
-                        const SizedBox(height: 6),
-                        _quickActions(),
-                        if (_shopId != null &&
-                            _shopData?['status'] == 'verified') ...[
-                          _addProductButton(),
-                          const SizedBox(height: 12),
-                          SizedBox(
-                              key: _productListKey,
-                              child: _productList()),
+                          _suspendedBanner(),
+                          _gracePeriodBanner(),
+                          _notificationBanner(),
+                          if (_shopData?['status'] == 'verified') ...[
+                            _statsRow(),
+                            const SizedBox(height: 12),
+                          ],
+                          _sectionLabel(
+                              'My Shop', Icons.storefront_outlined),
+                          _shopStatusSection(),
+                          const SizedBox(height: 6),
+                          _quickActions(),
+                          if (_shopId != null &&
+                              _shopData?['status'] == 'verified') ...[
+                            _addProductButton(),
+                            const SizedBox(height: 12),
+                            SizedBox(
+                                key: _productListKey,
+                                child: _productList()),
+                          ],
                         ],
                       ]),
                 ),
@@ -2230,7 +2466,7 @@ class _ShopkeeperDashboardState extends State<ShopkeeperDashboard>
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-//  SHOP TIMING PAGE
+//  SHOP TIMING PAGE (Unchanged)
 // ══════════════════════════════════════════════════════════════════════════
 
 class ShopTimingPage extends StatefulWidget {
@@ -2815,7 +3051,7 @@ class _ShopTimingPageState extends State<ShopTimingPage> {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-//  PROFILE PAGE
+//  PROFILE PAGE (Unchanged)
 // ══════════════════════════════════════════════════════════════════════════
 
 class _ProfilePage extends StatefulWidget {
