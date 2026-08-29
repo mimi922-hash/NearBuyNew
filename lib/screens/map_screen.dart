@@ -14,7 +14,6 @@ import '../shop_products_screen.dart';
 import '../nearbuy_theme.dart';
 
 class MapScreen extends StatefulWidget {
-  /// If set, this destination will be highlighted and a route drawn immediately.
   final double? destinationLat;
   final double? destinationLng;
   final String? destinationName;
@@ -39,8 +38,35 @@ class _MapScreenState extends State<MapScreen> {
   bool _isLoading = true;
   _ShopInfo? _selectedShop;
   bool _showRoutePanel = false;
+  
+  // ─── All shops data for filtering ──────────────────────────
+  List<_ShopInfo> _allShops = [];
+  bool _isFiltering = false;
 
-  final List<String> _categories = ['All', 'Grocery', 'Pharmacy', 'Electronics', 'Restaurant', 'Clothing'];
+  // ─── Complete Categories List (same as Customer Dashboard) ──
+  final List<Map<String, dynamic>> _categories = [
+    {'label': 'All', 'icon': Icons.apps_rounded},
+    {'label': 'Grocery & General Store', 'icon': Icons.local_grocery_store_rounded},
+    {'label': 'Clothing & Fashion', 'icon': Icons.checkroom_rounded},
+    {'label': 'Shoes & Footwear', 'icon': Icons.shopping_bag_rounded},
+    {'label': 'Electronics & Mobiles', 'icon': Icons.devices_rounded},
+    {'label': 'Pharmacy & Health', 'icon': Icons.local_pharmacy_rounded},
+    {'label': 'Beauty & Cosmetics', 'icon': Icons.face_retouching_natural_rounded},
+    {'label': 'Bakery & Sweets', 'icon': Icons.bakery_dining_rounded},
+    {'label': 'Restaurants & Food', 'icon': Icons.restaurant_rounded},
+    {'label': 'Fruits & Vegetables', 'icon': Icons.eco_rounded},
+    {'label': 'Meat & Poultry', 'icon': Icons.set_meal_rounded},
+    {'label': 'Stationery & Books', 'icon': Icons.menu_book_rounded},
+    {'label': 'Hardware & Tools', 'icon': Icons.handyman_rounded},
+    {'label': 'Furniture & Home Decor', 'icon': Icons.chair_rounded},
+    {'label': 'Jewellery & Accessories', 'icon': Icons.diamond_rounded},
+    {'label': 'Sports & Fitness', 'icon': Icons.sports_soccer_rounded},
+    {'label': 'Auto Parts & Accessories', 'icon': Icons.car_repair_rounded},
+    {'label': 'Baby & Kids', 'icon': Icons.child_friendly_rounded},
+    {'label': 'Pet Supplies', 'icon': Icons.pets_rounded},
+    {'label': 'Gifts & Flowers', 'icon': Icons.card_giftcard_rounded},
+    {'label': 'Other', 'icon': Icons.more_horiz_rounded},
+  ];
 
   @override
   void initState() {
@@ -65,28 +91,68 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Color _getCategoryColor(String category) {
-    switch (category.toLowerCase()) {
-      case 'grocery':     return const Color(0xFF10B981);
-      case 'pharmacy':    return const Color(0xFF3B82F6);
-      case 'electronics': return const Color(0xFFF59E0B);
-      case 'restaurant':  return const Color(0xFFEF4444);
-      case 'clothing':    return const Color(0xFFEC4899);
-      default:            return NearBuyColors.navy;
-    }
+    final cat = category.toLowerCase();
+    if (cat.contains('grocery') || cat.contains('general store')) return const Color(0xFF10B981);
+    if (cat.contains('pharmacy') || cat.contains('health')) return const Color(0xFF3B82F6);
+    if (cat.contains('electronic') || cat.contains('mobile')) return const Color(0xFFF59E0B);
+    if (cat.contains('restaurant') || cat.contains('food')) return const Color(0xFFEF4444);
+    if (cat.contains('clothing') || cat.contains('fashion')) return const Color(0xFFEC4899);
+    if (cat.contains('beauty') || cat.contains('cosmetic')) return const Color(0xFF8B5CF6);
+    if (cat.contains('bakery') || cat.contains('sweet')) return const Color(0xFFF472B6);
+    if (cat.contains('furniture') || cat.contains('decor')) return const Color(0xFF8B5CF6);
+    if (cat.contains('jewellery') || cat.contains('accessories')) return const Color(0xFFF59E0B);
+    if (cat.contains('sports') || cat.contains('fitness')) return const Color(0xFF10B981);
+    if (cat.contains('auto') || cat.contains('parts')) return const Color(0xFF6B7280);
+    if (cat.contains('baby') || cat.contains('kids')) return const Color(0xFFF472B6);
+    if (cat.contains('pet')) return const Color(0xFF8B5CF6);
+    if (cat.contains('gift') || cat.contains('flower')) return const Color(0xFFEC4899);
+    return NearBuyColors.navy;
   }
 
-  Future<BitmapDescriptor> _createCustomMarker(String shopName, Color color) async {
+  String _getCategoryEmoji(String category) {
+    final cat = category.toLowerCase();
+    if (cat.contains('grocery') || cat.contains('general store')) return '🛒';
+    if (cat.contains('clothing') || cat.contains('fashion')) return '👕';
+    if (cat.contains('shoe') || cat.contains('footwear')) return '👟';
+    if (cat.contains('electronic') || cat.contains('mobile')) return '📱';
+    if (cat.contains('pharmacy') || cat.contains('health')) return '💊';
+    if (cat.contains('beauty') || cat.contains('cosmetic')) return '💄';
+    if (cat.contains('bakery') || cat.contains('sweet')) return '🍰';
+    if (cat.contains('restaurant') || cat.contains('food')) return '🍽';
+    if (cat.contains('fruit') || cat.contains('vegetable')) return '🥦';
+    if (cat.contains('meat') || cat.contains('poultry')) return '🍗';
+    if (cat.contains('stationery') || cat.contains('book')) return '📚';
+    if (cat.contains('hardware') || cat.contains('tool')) return '🛠';
+    if (cat.contains('furniture') || cat.contains('decor')) return '🛋';
+    if (cat.contains('jewellery') || cat.contains('accessories')) return '💎';
+    if (cat.contains('sports') || cat.contains('fitness')) return '⚽';
+    if (cat.contains('auto') || cat.contains('parts')) return '🚗';
+    if (cat.contains('baby') || cat.contains('kids')) return '🧸';
+    if (cat.contains('pet')) return '🐾';
+    if (cat.contains('gift') || cat.contains('flower')) return '🎁';
+    return '🏪';
+  }
+
+  Future<BitmapDescriptor> _createCustomMarker(String shopName, String category) async {
     const double w = 300, h = 130;
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
+
+    final color = _getCategoryColor(category);
+    final emoji = _getCategoryEmoji(category);
 
     // Drop pin
     final pinPaint = Paint()..color = color;
     canvas.drawCircle(const Offset(56, 56), 34, pinPaint);
     // White inner
     canvas.drawCircle(const Offset(56, 56), 20, Paint()..color = Colors.white);
-    // Store icon - simplified circle
-    canvas.drawCircle(const Offset(56, 56), 10, Paint()..color = color);
+    // Store icon - emoji
+    final tpEmoji = TextPainter(
+      text: TextSpan(text: emoji, style: const TextStyle(fontSize: 20)),
+      textDirection: TextDirection.ltr,
+    );
+    tpEmoji.layout();
+    tpEmoji.paint(canvas, Offset(56 - tpEmoji.width / 2, 56 - tpEmoji.height / 2));
     // Pin tip
     final path = Path()
       ..moveTo(56, 95)..lineTo(42, 70)..lineTo(70, 70)..close();
@@ -121,16 +187,16 @@ class _MapScreenState extends State<MapScreen> {
         .where('status', isEqualTo: 'verified')
         .snapshots()
         .listen((snapshot) async {
-      Set<Marker> markers = {};
+      List<_ShopInfo> shops = [];
+      
       for (var doc in snapshot.docs) {
         final data = doc.data();
-        final lat  = data['location_lat'] as double?;
-        final lng  = data['location_lng'] as double?;
+        final lat = data['location_lat'] as double?;
+        final lng = data['location_lng'] as double?;
         if (lat == null || lng == null) continue;
 
-        final category = data['shop_category'] ?? 'Other';
-        final shopName = data['shop_name']     ?? 'Shop';
-        final color = _getCategoryColor(category);
+        final category = data['category'] ?? data['shop_category'] ?? 'Other';
+        final shopName = data['shop_name'] ?? 'Shop';
 
         double avgRating = 0.0;
         int reviewCount = 0;
@@ -145,30 +211,78 @@ class _MapScreenState extends State<MapScreen> {
           }
         } catch (_) {}
 
-        final icon = await _createCustomMarker(shopName, color);
-        final shopInfo = _ShopInfo(
-          id: doc.id, name: shopName, category: category,
-          lat: lat, lng: lng, avgRating: avgRating, reviewCount: reviewCount,
-          address: data['address'] ?? '', phone: data['phone'] ?? '',
-        );
-
-        markers.add(Marker(
-          markerId: MarkerId(doc.id),
-          position: LatLng(lat, lng),
-          icon: icon,
-          onTap: () {
-            setState(() {
-              _selectedShop = shopInfo;
-              _showRoutePanel = true;
-            });
-          },
+        shops.add(_ShopInfo(
+          id: doc.id,
+          name: shopName,
+          category: category,
+          lat: lat,
+          lng: lng,
+          avgRating: avgRating,
+          reviewCount: reviewCount,
+          address: data['shop_location'] ?? data['address'] ?? data['location'] ?? '',
+          phone: data['phone'] ?? data['mobile'] ?? '',
         ));
       }
-      if (mounted) setState(() => _shopMarkers = markers);
+
+      // Store all shops for filtering
+      _allShops = shops;
+      
+      // Apply category filter if selected
+      await _applyFilter(_selectedCategory);
+      
+      if (mounted) setState(() => _isFiltering = false);
     });
   }
 
-  // ─── Open Google Maps with Directions ─────────────────
+  Future<void> _applyFilter(String? category) async {
+    if (_allShops.isEmpty) return;
+    
+    setState(() => _isFiltering = true);
+    
+    List<_ShopInfo> filteredShops = _allShops;
+    
+    // Filter by category
+    if (category != null && category != 'All') {
+      filteredShops = _allShops.where((shop) {
+        final shopCat = shop.category.toLowerCase().trim();
+        final filterCat = category.toLowerCase().trim();
+        return shopCat.contains(filterCat) || filterCat.contains(shopCat);
+      }).toList();
+    }
+
+    // Create markers for filtered shops
+    Set<Marker> markers = {};
+    for (var shop in filteredShops) {
+      final icon = await _createCustomMarker(shop.name, shop.category);
+      markers.add(Marker(
+        markerId: MarkerId(shop.id),
+        position: LatLng(shop.lat, shop.lng),
+        icon: icon,
+        onTap: () {
+          setState(() {
+            _selectedShop = shop;
+            _showRoutePanel = true;
+          });
+        },
+      ));
+    }
+
+    if (mounted) {
+      setState(() {
+        _shopMarkers = markers;
+        _isFiltering = false;
+      });
+    }
+
+    // If a shop is selected and we have filtered, keep it selected
+    if (_selectedShop != null && !filteredShops.any((s) => s.id == _selectedShop!.id)) {
+      setState(() {
+        _selectedShop = null;
+        _showRoutePanel = false;
+      });
+    }
+  }
+
   Future<void> _openGoogleMapsDirections(_ShopInfo shop) async {
     final Uri uri = Uri.parse(
       'https://www.google.com/maps/dir/?api=1'
@@ -180,7 +294,6 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
-  // ─── Navigate to shop page ─────────────────────────────
   void _goToShop(_ShopInfo shop) {
     Navigator.push(context, MaterialPageRoute(
       builder: (_) => ShopProductsScreen(shopId: shop.id, shopName: shop.name),
@@ -194,8 +307,10 @@ class _MapScreenState extends State<MapScreen> {
       body: Stack(
         children: [
           // Map
-          _isLoading
-              ? const Center(child: CircularProgressIndicator(color: NearBuyColors.orange))
+          _isLoading || _isFiltering
+              ? const Center(
+                  child: CircularProgressIndicator(color: NearBuyColors.orange),
+                )
               : GoogleMap(
                   initialCameraPosition: CameraPosition(
                     target: _currentLatLng ?? const LatLng(31.5204, 74.3587),
@@ -244,6 +359,30 @@ class _MapScreenState extends State<MapScreen> {
                 }
               },
               child: const Icon(Icons.my_location_rounded, color: NearBuyColors.navy),
+            ),
+          ),
+
+          // Shop count badge
+          Positioned(
+            bottom: _showRoutePanel ? 370 : 170,
+            right: 16,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: NearBuyColors.navy,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 8),
+                ],
+              ),
+              child: Text(
+                '${_shopMarkers.length} shops',
+                style: GoogleFonts.poppins(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white,
+                ),
+              ),
             ),
           ),
 
@@ -327,9 +466,15 @@ class _MapScreenState extends State<MapScreen> {
         itemCount: _categories.length,
         itemBuilder: (ctx, i) {
           final cat = _categories[i];
-          final isSelected = (_selectedCategory ?? 'All') == cat;
+          final isSelected = (_selectedCategory ?? 'All') == cat['label'];
           return GestureDetector(
-            onTap: () => setState(() => _selectedCategory = cat == 'All' ? null : cat),
+            onTap: () {
+              final newCategory = cat['label'] == 'All' ? null : cat['label'] as String;
+              setState(() {
+                _selectedCategory = newCategory;
+              });
+              _applyFilter(newCategory);
+            },
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 200),
               margin: const EdgeInsets.only(right: 8),
@@ -339,10 +484,25 @@ class _MapScreenState extends State<MapScreen> {
                 borderRadius: BorderRadius.circular(20),
                 boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 6)],
               ),
-              child: Text(cat, style: GoogleFonts.poppins(
-                fontSize: 12, fontWeight: FontWeight.w600,
-                color: isSelected ? Colors.white : NearBuyColors.textPrimary,
-              )),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    cat['icon'] as IconData,
+                    size: 14,
+                    color: isSelected ? Colors.white : NearBuyColors.textSecondary,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    cat['label'],
+                    style: GoogleFonts.poppins(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: isSelected ? Colors.white : NearBuyColors.textPrimary,
+                    ),
+                  ),
+                ],
+              ),
             ),
           );
         },
@@ -378,8 +538,11 @@ class _MapScreenState extends State<MapScreen> {
                     color: _getCategoryColor(shop.category).withOpacity(0.12),
                     borderRadius: BorderRadius.circular(14),
                   ),
-                  child: Icon(Icons.storefront_rounded,
-                      color: _getCategoryColor(shop.category), size: 26),
+                  child: Text(
+                    _getCategoryEmoji(shop.category),
+                    style: const TextStyle(fontSize: 24),
+                    textAlign: TextAlign.center,
+                  ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -395,7 +558,7 @@ class _MapScreenState extends State<MapScreen> {
                     ],
                   ),
                 ),
-                StarRatingRow(rating: shop.avgRating, reviewCount: shop.reviewCount),
+                _StarRatingRowInline(rating: shop.avgRating, reviewCount: shop.reviewCount),
               ],
             ),
             if (shop.address.isNotEmpty) ...[
@@ -505,6 +668,39 @@ class _MapScreenState extends State<MapScreen> {
   }
 }
 
+// ─── Star Rating Row Widget (Inline) ──────────────────────
+class _StarRatingRowInline extends StatelessWidget {
+  final double rating;
+  final int reviewCount;
+
+  const _StarRatingRowInline({required this.rating, required this.reviewCount});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        ...List.generate(5, (i) {
+          if (i < rating.floor()) {
+            return const Icon(Icons.star_rounded, color: NearBuyColors.orange, size: 14);
+          } else if (i < rating.ceil() && rating % 1 >= 0.25) {
+            return const Icon(Icons.star_half_rounded, color: NearBuyColors.orange, size: 14);
+          } else {
+            return Icon(Icons.star_border_rounded, color: NearBuyColors.textHint, size: 14);
+          }
+        }),
+        const SizedBox(width: 4),
+        Text(
+          '${rating.toStringAsFixed(1)} ($reviewCount)',
+          style: GoogleFonts.poppins(
+            fontSize: 10,
+            color: NearBuyColors.textSecondary,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 // ─── Shop Info Model ───────────────────────────────────────
 class _ShopInfo {
   final String id, name, category, address, phone;
@@ -512,8 +708,14 @@ class _ShopInfo {
   final int reviewCount;
 
   const _ShopInfo({
-    required this.id, required this.name, required this.category,
-    required this.lat, required this.lng, required this.avgRating,
-    required this.reviewCount, required this.address, required this.phone,
+    required this.id,
+    required this.name,
+    required this.category,
+    required this.lat,
+    required this.lng,
+    required this.avgRating,
+    required this.reviewCount,
+    required this.address,
+    required this.phone,
   });
 }

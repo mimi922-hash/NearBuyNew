@@ -129,7 +129,7 @@ class _ShopkeeperBillingScreenState extends State<ShopkeeperBillingScreen> {
     }
   }
 
-  // ─── Calculate Platform Fee = 5% of orderTotal ─────────────────────
+  // ─── FIXED: Calculate Platform Fee from stored platformFee field ────
   Future<void> _loadData() async {
     setState(() => _loading = true);
 
@@ -168,33 +168,20 @@ class _ShopkeeperBillingScreenState extends State<ShopkeeperBillingScreen> {
           data['billingCycleId'] == null);
     }).toList();
 
-    // ─── Calculate 5% from orderTotal ──────────────────────────────────
+    // ─── FIXED: Read platformFee directly from order ──────────────────
     int pendingFee = 0;
     for (final doc in unpaidDocs) {
       final data = doc.data();
       
-      // Get order total from the order document
-      num? orderTotal;
+      // Get the already stored platformFee from the order
+      final platformFee = (data['platformFee'] as num?)?.toInt() ?? 0;
       
-      // Try different possible field names
-      if (data.containsKey('orderTotal')) {
-        orderTotal = (data['orderTotal'] as num?)?.toDouble();
-      } else if (data.containsKey('totalAmount')) {
-        orderTotal = (data['totalAmount'] as num?)?.toDouble();
-      } else if (data.containsKey('grandTotal')) {
-        orderTotal = (data['grandTotal'] as num?)?.toDouble();
-      } else if (data.containsKey('amount')) {
-        orderTotal = (data['amount'] as num?)?.toDouble();
-      } else if (data.containsKey('total_amount')) {
-        orderTotal = (data['total_amount'] as num?)?.toDouble();
-      } else if (data.containsKey('order_amount')) {
-        orderTotal = (data['order_amount'] as num?)?.toDouble();
-      }
+      // Add to pending fee
+      pendingFee += platformFee;
       
-      // Platform Fee = 5% of order total
-      if (orderTotal != null && orderTotal > 0) {
-        final fee = (orderTotal * 0.05).toInt();
-        pendingFee += fee;
+      // Optional: Log if platformFee is missing
+      if (platformFee == 0 && data['totalAmount'] != null) {
+        debugPrint('Order ${doc.id} has missing platformFee. TotalAmount: ${data['totalAmount']}');
       }
     }
 
@@ -381,8 +368,6 @@ class _ShopkeeperBillingScreenState extends State<ShopkeeperBillingScreen> {
           ),
         ),
       ),
-      // FIX: bottom nav bar removed per request. The rest of the screen's
-      // logic (data loading, countdown, suspend flow, actions) is untouched.
     );
   }
 
@@ -602,13 +587,7 @@ class _ShopkeeperBillingScreenState extends State<ShopkeeperBillingScreen> {
     );
   }
 
-  // ─── UPDATED: Shows "Platform Fee (5%)" ──────────────────────────
-  // FIX: grid cards were overflowing (~5.7px) when a subtitle line was
-  // present, because the fixed childAspectRatio didn't leave enough
-  // vertical room for icon + value + title + subtitle. Lowered the
-  // aspect ratio slightly (taller cells) and swapped the inner
-  // spaceBetween layout for a tight, top-aligned Column so the content
-  // only takes the height it actually needs — no more, no less.
+  // ─── FIXED: Shows "Platform Fee (5%)" from stored platformFee ──────
   Widget _buildSummaryGrid(
       int fee, int orderCount, String monthLabel, String payStatus) {
     String payStatusDisplay;
@@ -637,7 +616,7 @@ class _ShopkeeperBillingScreenState extends State<ShopkeeperBillingScreen> {
         'value': fee == 0 ? 'Rs. 0' : 'Rs. $fee',
         'icon': Icons.account_balance_wallet_outlined,
         'color': fee == 0 ? Colors.green : kOrange,
-        'subtitle': fee > 0 ? '5% of order total' : 'No pending orders',
+        'subtitle': fee > 0 ? 'From ${orderCount} delivered orders' : 'No pending orders',
       },
       {
         'title': 'Unpaid Orders',
@@ -667,7 +646,7 @@ class _ShopkeeperBillingScreenState extends State<ShopkeeperBillingScreen> {
         crossAxisCount: 2,
         crossAxisSpacing: 12,
         mainAxisSpacing: 12,
-        childAspectRatio: 1.25, // was 1.5 — taller cells so 3-line cards fit
+        childAspectRatio: 1.25,
       ),
       itemCount: cards.length,
       itemBuilder: (_, i) {

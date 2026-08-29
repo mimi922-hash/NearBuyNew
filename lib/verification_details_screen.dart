@@ -30,7 +30,7 @@ class _VerificationDetailsScreenState
   bool _processing = false;
   String? _selectedRejectionReason;
   
-  // ─── NEW: For showing fee breakdown ──────────────────────────────
+  // ─── For displaying fee breakdown ──────────────────────────────
   double _totalOrderAmount = 0;
   double _calculatedFee = 0;
   List<Map<String, dynamic>> _orderDetails = [];
@@ -48,7 +48,7 @@ class _VerificationDetailsScreenState
     _loadOrderDetails();
   }
 
-  // ─── NEW: Load order details to calculate 5% fee ──────────────────
+  // ─── FIXED: Load order details using stored platformFee ──────────
   Future<void> _loadOrderDetails() async {
     final orderIds = (widget.billingData['orderIds'] as List<dynamic>?)
             ?.cast<String>() ??
@@ -66,6 +66,7 @@ class _VerificationDetailsScreenState
     try {
       final firestore = FirebaseFirestore.instance;
       double totalAmount = 0;
+      double totalPlatformFee = 0;
       List<Map<String, dynamic>> details = [];
 
       for (String orderId in orderIds) {
@@ -73,9 +74,11 @@ class _VerificationDetailsScreenState
         if (doc.exists) {
           final data = doc.data() as Map<String, dynamic>;
 
+          // ─── READ STORED platformFee ──────────────────────────────
+          final platformFee = (data['platformFee'] as num?)?.toDouble() ?? 0;
+          
+          // ─── READ order total for display purposes ────────────────
           num? orderTotal;
-
-          // Try different possible field names
           if (data.containsKey('orderTotal')) {
             orderTotal = (data['orderTotal'] as num?)?.toDouble();
           } else if (data.containsKey('totalAmount')) {
@@ -92,33 +95,35 @@ class _VerificationDetailsScreenState
 
           if (orderTotal != null && orderTotal > 0) {
             totalAmount += orderTotal.toDouble();
-            details.add({
-              'orderId': orderId,
-              'orderTotal': orderTotal.toDouble(),
-              'platformFee': orderTotal.toDouble() * 0.05,
-            });
           }
+          
+          // ─── USE STORED platformFee ──────────────────────────────
+          totalPlatformFee += platformFee;
+          
+          details.add({
+            'orderId': orderId,
+            'orderTotal': orderTotal?.toDouble() ?? 0,
+            'platformFee': platformFee, // ✅ Using stored value
+          });
         }
       }
 
-      double calculatedFee = totalAmount * 0.05;
-
       setState(() {
         _totalOrderAmount = totalAmount;
-        _calculatedFee = calculatedFee;
+        _calculatedFee = totalPlatformFee; // ✅ Using stored sum
         _orderDetails = details;
       });
 
-      // Update stored fee if mismatch
+      // Update stored fee if mismatch (safety check)
       double storedFee = (widget.billingData['total_platform_fee'] ?? 0).toDouble();
-      if ((calculatedFee - storedFee).abs() > 0.01) {
+      if ((totalPlatformFee - storedFee).abs() > 0.01) {
         await firestore
             .collection('billing')
             .doc(widget.billingId)
             .update({
-          'total_platform_fee': calculatedFee.round(),
+          'total_platform_fee': totalPlatformFee.round(),
         });
-        widget.billingData['total_platform_fee'] = calculatedFee.round();
+        widget.billingData['total_platform_fee'] = totalPlatformFee.round();
       }
     } catch (e) {
       debugPrint('Error loading order details: $e');
@@ -310,6 +315,22 @@ class _VerificationDetailsScreenState
     );
   }
 
+  // ─── Helper: Format time in 12-hour format ──────────────────────
+  String _formatTime12Hour(dynamic timestamp) {
+    if (timestamp == null || timestamp is! Timestamp) return '-';
+    
+    final dt = timestamp.toDate();
+    int hour = dt.hour;
+    final minute = dt.minute;
+    final amPm = hour >= 12 ? 'PM' : 'AM';
+    
+    // Convert to 12-hour format
+    if (hour > 12) hour = hour - 12;
+    if (hour == 0) hour = 12;
+    
+    return '${dt.day}/${dt.month}/${dt.year} ${hour}:${minute.toString().padLeft(2, '0')} $amPm';
+  }
+
   @override
   Widget build(BuildContext context) {
     final data = widget.billingData;
@@ -322,7 +343,7 @@ class _VerificationDetailsScreenState
     final orderCount = ((data['order_count'] ?? 0) as num).toInt();
     final orderIds = (data['orderIds'] as List<dynamic>?)?.cast<String>() ?? [];
 
-    // ─── NEW: Show fee breakdown ──────────────────────────────────────
+    // ─── Show fee breakdown ──────────────────────────────────────
     final showFeeBreakdown = _orderDetails.isNotEmpty && _totalOrderAmount > 0;
 
     return Scaffold(
@@ -361,7 +382,7 @@ class _VerificationDetailsScreenState
               children: [
                 _infoRow('Billing Month', monthLabel),
                 
-                // ─── UPDATED: Platform Fee with breakdown ──────────────
+                // ─── FIXED: Platform Fee with breakdown ──────────────
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -456,6 +477,23 @@ class _VerificationDetailsScreenState
                                 ),
                               ],
                             ),
+                            // ─── NEW: Show source of truth ──────────
+                            Container(
+                              margin: const EdgeInsets.only(top: 4),
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.blue.shade50,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                '✓ Fee sourced from orders (5% of subtotal)',
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  color: Colors.blue.shade700,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -469,7 +507,7 @@ class _VerificationDetailsScreenState
                 if (note != null && note.isNotEmpty)
                   _infoRow('Note', note),
                 if (data['submitted_at'] != null)
-                  _infoRow('Submitted At', _fmtTs(data['submitted_at'])),
+                  _infoRow('Submitted At', _formatTime12Hour(data['submitted_at'])), // ✅ 12-hour format
               ],
             ),
 
@@ -708,13 +746,5 @@ class _VerificationDetailsScreenState
         ],
       ),
     );
-  }
-
-  String _fmtTs(dynamic ts) {
-    if (ts is Timestamp) {
-      final dt = ts.toDate();
-      return '${dt.day}/${dt.month}/${dt.year} ${dt.hour}:${dt.minute.toString().padLeft(2, '0')}';
-    }
-    return '-';
   }
 }

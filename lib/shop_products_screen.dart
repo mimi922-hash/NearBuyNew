@@ -1,4 +1,4 @@
-// ============================================================
+// ============================================================ 
 //  shop_products_screen.dart — NearBuy Redesign
 // ============================================================
 
@@ -127,13 +127,9 @@ class _ShopProductsScreenState extends State<ShopProductsScreen>
     });
   }
 
+  // ── UPDATED: Add to cart with stock validation ──
   Future<void> _addToCart(Map<String, dynamic> productData, String productId) async {
     // ── FIX: Shop-suspended guard ──────────────────────────
-    // Blocks ordering the moment shops.status becomes 'suspended' —
-    // _shopData is already kept live via the snapshots() listener in
-    // _loadShopData(), so this reflects the shopkeeper-side auto-suspend
-    // (and the admin dashboard's manual suspend) the instant it lands in
-    // Firestore, with no extra query needed here.
     if (_isShopSuspended) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -148,10 +144,6 @@ class _ShopProductsScreenState extends State<ShopProductsScreen>
     }
 
     // ── Shop-closed guard ──────────────────────────────────
-    // Extra safety net: even though the Add button is already disabled
-    // in the UI when the shop is closed, this blocks the actual write
-    // too (e.g. if triggered programmatically), without touching any
-    // other existing behaviour of this function.
     if (!_isShopOpenNow) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -165,15 +157,73 @@ class _ShopProductsScreenState extends State<ShopProductsScreen>
       return;
     }
 
+    // ── NEW: Get current stock from Firestore ──
+    final productRef = FirebaseFirestore.instance
+        .collection('shops')
+        .doc(widget.shopId)
+        .collection('products')
+        .doc(productId);
+    
+    final productSnapshot = await productRef.get();
+    if (!productSnapshot.exists) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Product not found', style: GoogleFonts.poppins()),
+          backgroundColor: NearBuyColors.error,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      );
+      return;
+    }
+
+    final productDataCurrent = productSnapshot.data() as Map<String, dynamic>;
+    final int availableStock = (productDataCurrent['quantity'] ?? 0) as int;
+
+    // ── NEW: Check if product is out of stock ──
+    if (availableStock <= 0) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${productData['name']} is out of stock', style: GoogleFonts.poppins()),
+          backgroundColor: NearBuyColors.error,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      );
+      return;
+    }
+
+    // ── NEW: Get current cart quantity for this product ──
     final cartRef = FirebaseFirestore.instance
         .collection('users')
         .doc(user!.uid)
         .collection('cart')
         .doc('${widget.shopId}_$productId');
+    
+    final cartSnapshot = await cartRef.get();
+    final int currentCartQty = cartSnapshot.exists 
+        ? (cartSnapshot.data()!['quantity'] ?? 1) as int 
+        : 0;
 
-    final existing = await cartRef.get();
-    if (existing.exists) {
-      await cartRef.update({'quantity': (existing.data()!['quantity'] ?? 1) + 1});
+    // ── NEW: Check if adding more would exceed stock ──
+    if (currentCartQty >= availableStock) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Only $availableStock item${availableStock > 1 ? 's' : ''} available.', style: GoogleFonts.poppins()),
+          backgroundColor: NearBuyColors.error,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      );
+      return;
+    }
+
+    // ── Proceed with adding to cart ──
+    if (cartSnapshot.exists) {
+      await cartRef.update({'quantity': (cartSnapshot.data()!['quantity'] ?? 1) + 1});
     } else {
       await cartRef.set({
         'shopId': widget.shopId,
@@ -247,7 +297,7 @@ class _ShopProductsScreenState extends State<ShopProductsScreen>
     int ratedCount = 0;
     for (var d in snapshot.docs) {
       final rating = d.data()['rating'];
-      if (rating == null) continue; // old/new review missing rating --- skip, don't count as 0
+      if (rating == null) continue;
       total += _parseRating(rating);
       ratedCount++;
     }
@@ -255,8 +305,6 @@ class _ShopProductsScreenState extends State<ShopProductsScreen>
   }
 
   // ── Resolves the reviewer's display name + profile pic before submitting.
-  // Name priority: Firestore users/{uid}.name -> FirebaseAuth displayName -> 'Anonymous'
-  // Profile pic: Firestore users/{uid}.profile_image (same field customer_dashboard.dart uses)
   Future<Map<String, String?>> _fetchReviewerProfile() async {
     String name = user?.displayName ?? 'Anonymous';
     String? profilePic;
@@ -273,10 +321,7 @@ class _ShopProductsScreenState extends State<ShopProductsScreen>
           profilePic = pic.toString();
         }
       }
-    } catch (_) {
-      // Firestore lookup failed --- fall back to Auth displayName / Anonymous,
-      // never block review submission because of this.
-    }
+    } catch (_) {}
     return {'name': name, 'profilePic': profilePic};
   }
 
@@ -400,9 +445,6 @@ class _ShopProductsScreenState extends State<ShopProductsScreen>
                   final commentText = _commentController.text.trim();
 
                   try {
-                    // widget.shopId is the exact same id passed in from
-                    // CustomerDashboard -> ShopProductsScreen, so this
-                    // always lands under the correct shop's document.
                     await FirebaseFirestore.instance
                         .collection('shops')
                         .doc(widget.shopId)
@@ -454,8 +496,6 @@ class _ShopProductsScreenState extends State<ShopProductsScreen>
 
   // ══════════════════════════════════════════════════════════
   // TEMPORARY CLOSURE CHECK
-  // Firestore mein temporary_closures array check karo —
-  // agar aaj ki date match hoti hai to shop temporarily closed hai
   // ══════════════════════════════════════════════════════════
   Map<String, dynamic>? _getTodayTemporaryClosure(Map<String, dynamic>? shopData) {
     if (shopData == null) return null;
@@ -463,68 +503,44 @@ class _ShopProductsScreenState extends State<ShopProductsScreen>
     if (closures == null || closures is! List) return null;
 
     final now = DateTime.now();
-    // Aaj ki date string — Firestore mein "YYYY-MM-DD" format mein store hai
     final todayStr =
         '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
 
     for (final item in closures) {
       if (item is Map<String, dynamic>) {
         final closureDate = item['date']?.toString() ?? '';
-        // Date string match karo (e.g. "2026-06-01")
         if (closureDate == todayStr) {
-          return item; // { date: "2026-06-01", reason: "Death" }
+          return item;
         }
       }
     }
-    return null; // Aaj koi closure nahi
+    return null;
   }
 
   // ══════════════════════════════════════════════════════════
-  // SHOP SUSPENDED CHECK — used to gate "Add to Cart"
+  // SHOP SUSPENDED CHECK
   // ══════════════════════════════════════════════════════════
-  //
-  // FIX (new): _shopData is already kept live via the snapshots()
-  // listener in _loadShopData(), so this reflects `shops.status`
-  // ('suspended' vs anything else) the instant it changes — including
-  // the auto-suspend write from ShopkeeperBillingScreen's grace-period
-  // timer, and the manual suspend/reactivate actions on the admin side.
-  // Defensive by design, same as _isShopOpenNow below: if shop data
-  // hasn't loaded yet, we default to "not suspended" so we never wrongly
-  // block a purchase just because of a brief loading gap.
   bool get _isShopSuspended {
-    if (_shopData == null) return false; // not loaded yet — don't block
+    if (_shopData == null) return false;
     return _shopData?['status'] == 'suspended';
   }
 
   // ══════════════════════════════════════════════════════════
-  // SHOP OPEN/CLOSED STATUS — used to gate "Add to Cart"
+  // SHOP OPEN/CLOSED STATUS
   // ══════════════════════════════════════════════════════════
-  //
-  // Reuses the exact same signals that _buildShopInfoCard() already shows
-  // to the user as the "Open" / "Closed" / "Closed Today" badge, so the
-  // Add-to-Cart button always matches what's on screen. Nothing in
-  // _buildShopInfoCard() itself is touched — this just re-derives the
-  // same status from `_shopData` (already kept in state via _loadShopData)
-  // so it can also be used inside the Products tab / product cards.
-  //
-  // Defensive by design: if shop data hasn't loaded yet, or the shop_hours
-  // structure is missing/incomplete for today, we default to "open" so we
-  // never wrongly block a purchase just because of missing data — exactly
-  // like the other defensive filters already in this codebase.
   bool get _isShopOpenNow {
-    if (_shopData == null) return true; // not loaded yet — don't block
+    if (_shopData == null) return true;
 
-    // Temporary closure always wins, same as the banner logic.
     if (_getTodayTemporaryClosure(_shopData) != null) return false;
 
     final shopHours = _shopData?['shop_hours'] as Map<String, dynamic>?;
-    if (shopHours == null) return true; // no structured hours — can't confirm closed
+    if (shopHours == null) return true;
 
     final todayHours = shopHours[_todayKey()] as Map<String, dynamic>?;
-    if (todayHours == null) return true; // no entry for today — can't confirm closed
+    if (todayHours == null) return true;
 
     final isOpenFlag = todayHours['is_open'];
-    if (isOpenFlag == null) return true; // flag missing — can't confirm closed
+    if (isOpenFlag == null) return true;
 
     return isOpenFlag == true;
   }
@@ -686,7 +702,6 @@ class _ShopProductsScreenState extends State<ShopProductsScreen>
             ?? shopData?['phone_number']
             ?? '';
 
-        // ── Shop hours (regular schedule)
         final shopHours  = shopData?['shop_hours'] as Map<String, dynamic>?;
         final todayKey   = _todayKey();
         final todayHours = shopHours?[todayKey] as Map<String, dynamic>?;
@@ -699,19 +714,12 @@ class _ShopProductsScreenState extends State<ShopProductsScreen>
         final String displayClose = closeTime.isNotEmpty ? closeTime : fallbackClose.toString();
         final bool showHours      = displayOpen.isNotEmpty;
 
-        // ══════════════════════════════════════════════════
-        // TEMPORARY CLOSURE CHECK
-        // Firestore ke temporary_closures array se aaj ka
-        // closure fetch karo — agar match ho to banner dikhao
-        // ══════════════════════════════════════════════════
         final todayClosure = _getTodayTemporaryClosure(shopData);
         final bool isTemporarilyClosed = todayClosure != null;
         final String closureReason = todayClosure?['reason']?.toString() ?? 'Temporarily Closed';
 
         return Column(
           children: [
-            // ── TEMPORARILY CLOSED BANNER ──────────────────
-            // Sirf tab dikhega jab aaj temporary_closures mein entry ho
             if (isTemporarilyClosed)
               Container(
                 margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
@@ -748,7 +756,6 @@ class _ShopProductsScreenState extends State<ShopProductsScreen>
                               color: NearBuyColors.error,
                             ),
                           ),
-
                         ],
                       ),
                     ),
@@ -771,7 +778,6 @@ class _ShopProductsScreenState extends State<ShopProductsScreen>
                 ),
               ),
 
-            // ── SHOP INFO CARD ─────────────────────────────
             Container(
               margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
               padding: const EdgeInsets.all(16),
@@ -845,9 +851,6 @@ class _ShopProductsScreenState extends State<ShopProductsScreen>
                     _infoRow(Icons.phone_rounded, 'Contact not available', NearBuyColors.textSecondary),
                   ],
 
-                  // ── Open/Close hours row
-                  // Agar aaj temporarily closed hai to "Closed Today" show karo
-                  // warna normal shop_hours dikhao
                   if (showHours) ...[
                     const SizedBox(height: 8),
                     Row(
@@ -873,7 +876,6 @@ class _ShopProductsScreenState extends State<ShopProductsScreen>
                             ),
                           ),
                         ),
-                        // Badge — temporarily closed override karta hai normal status ko
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                           decoration: BoxDecoration(
@@ -977,10 +979,6 @@ class _ShopProductsScreenState extends State<ShopProductsScreen>
   Widget _buildProductsTab() {
     return Column(
       children: [
-        // ── FIX: Shop-suspended notice strip ───────────────
-        // Takes priority over the "closed" strip below — if the shop is
-        // suspended, that's the more specific/severe reason and should be
-        // the only banner shown.
         if (_isShopSuspended)
           Container(
             margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
@@ -1003,11 +1001,6 @@ class _ShopProductsScreenState extends State<ShopProductsScreen>
               ],
             ),
           )
-        // ── Shop-closed notice strip ──────────────────────
-        // Sirf Products tab ke oopar dikhta hai jab shop abhi closed ho.
-        // Products tab / list ko yahan touch nahi kiya — sirf ek info
-        // strip add ki hai, taake user samajh sake products dekh sakta
-        // hai lekin order abhi nahi kar sakta.
         else if (!_isShopOpenNow)
           Container(
             margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
@@ -1093,10 +1086,6 @@ class _ShopProductsScreenState extends State<ShopProductsScreen>
                 itemBuilder: (ctx, i) => _ProductCard(
                   doc: docs[i],
                   onAddToCart: _addToCart,
-                  // FIX: shop-open flag now also folds in the suspension
-                  // check, so the Add button is disabled and shows the
-                  // same "unavailable" treatment for a suspended shop as
-                  // it already does for a closed one.
                   isShopOpen: _isShopOpenNow && !_isShopSuspended,
                 ),
               );
@@ -1141,12 +1130,6 @@ class _ShopProductsScreenState extends State<ShopProductsScreen>
         ),
         Expanded(
           child: StreamBuilder<QuerySnapshot>(
-            // NOTE: no orderBy() here on purpose --- old reviews may be
-            // missing `createdAt` (and new ones don't have it at all,
-            // they use `timestamp`), so ordering by either field server-side
-            // would silently drop documents missing that field. Sorting is
-            // done client-side below instead, so old + new reviews always
-            // show up and no extra Firestore index is required.
             stream: FirebaseFirestore.instance
                 .collection('shops')
                 .doc(widget.shopId)
@@ -1157,8 +1140,6 @@ class _ShopProductsScreenState extends State<ShopProductsScreen>
                 return const Center(child: CircularProgressIndicator(color: NearBuyColors.navy));
               }
               final reviews = List<QueryDocumentSnapshot>.from(snapshot.data!.docs);
-              // Latest first; reviews with no usable date (old docs missing
-              // both timestamp & createdAt) are pushed to the bottom.
               reviews.sort((a, b) {
                 final da = _getReviewDate(a.data() as Map<String, dynamic>);
                 final db = _getReviewDate(b.data() as Map<String, dynamic>);
@@ -1212,10 +1193,6 @@ class _ShopProductsScreenState extends State<ShopProductsScreen>
 class _ProductCard extends StatefulWidget {
   final QueryDocumentSnapshot doc;
   final Future<void> Function(Map<String, dynamic>, String) onAddToCart;
-  // NEW: shop-level open/closed flag, passed down from
-  // _ShopProductsScreenState._isShopOpenNow. When false, the Add button
-  // becomes disabled (same visual treatment as out-of-stock), but the
-  // product itself stays fully visible/browsable.
   final bool isShopOpen;
 
   const _ProductCard({
@@ -1230,6 +1207,14 @@ class _ProductCard extends StatefulWidget {
 
 class _ProductCardState extends State<_ProductCard> {
   bool _adding = false;
+  int _currentQuantity = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    final data = widget.doc.data() as Map<String, dynamic>;
+    _currentQuantity = (data['quantity'] ?? 0) as int;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1238,12 +1223,31 @@ class _ProductCardState extends State<_ProductCard> {
     final price       = data['price']?.toString() ?? '0';
     final imageUrl    = data['image_url'] as String?;
     final description = data['description'] as String?;
-    final bool isOutOfStock = data['out_of_stock'] == true;
-    // Button is disabled if the product is out of stock OR the shop is
-    // currently closed/suspended. Out-of-stock keeps priority in the
-    // label below since that's the more specific reason.
+    
+    // ── UPDATED: Read quantity from Firestore ──
+    final int quantity = (data['quantity'] ?? 0) as int;
+    final bool isOutOfStock = quantity <= 0;
     final bool isShopClosed = !widget.isShopOpen;
     final bool isAddDisabled = isOutOfStock || isShopClosed;
+
+    // ── NEW: Determine stock status label ──
+    String stockLabel;
+    Color stockColor;
+    Color stockBgColor;
+
+    if (quantity <= 0) {
+      stockLabel = 'Out of Stock';
+      stockColor = NearBuyColors.error;
+      stockBgColor = NearBuyColors.error.withOpacity(0.1);
+    } else if (quantity <= 3) {
+      stockLabel = 'Only $quantity left';
+      stockColor = NearBuyColors.error;
+      stockBgColor = NearBuyColors.error.withOpacity(0.1);
+    } else {
+      stockLabel = 'In Stock';
+      stockColor = NearBuyColors.success;
+      stockBgColor = NearBuyColors.success.withOpacity(0.1);
+    }
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -1301,17 +1305,15 @@ class _ProductCardState extends State<_ProductCard> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                         decoration: BoxDecoration(
-                          color: isOutOfStock
-                              ? NearBuyColors.error.withOpacity(0.1)
-                              : NearBuyColors.success.withOpacity(0.1),
+                          color: stockBgColor,
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Text(
-                          isOutOfStock ? 'Out of Stock' : 'In Stock',
+                          stockLabel,
                           style: GoogleFonts.poppins(
                             fontSize: 9,
                             fontWeight: FontWeight.w700,
-                            color: isOutOfStock ? NearBuyColors.error : NearBuyColors.success,
+                            color: stockColor,
                           ),
                         ),
                       ),

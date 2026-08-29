@@ -1,77 +1,10 @@
 // ============================================================
-//  customer_dashboard.dart — NearBuy Redesign (+ Advanced Filters)
-// ============================================================
-//
-// NOTE ON ASSUMPTIONS (please read before wiring into your project):
-//
-// 1) PRICE FILTER
-//    Your `shops` collection (as shown to me) does NOT contain min/max
-//    price fields, and I don't have visibility into your actual
-//    products collection/schema. So this filter is implemented
-//    defensively in two layers so it can NEVER crash and NEVER
-//    silently guess a wrong field:
-//      a) If the shop document itself has `min_price` / `max_price`
-//         (num), those are used directly — cheapest, no extra reads.
-//      b) Otherwise, it lazily queries a TOP-LEVEL `products`
-//         collection filtered by `shopId == <shop doc id>` and reads
-//         a `price` (num) field to compute min/max for that shop.
-//         This result is cached in-memory so each shop is only
-//         queried once per session.
-//    -> If your products actually live somewhere else (e.g.
-//       `shops/{shopId}/products` subcollection, or a different field
-//       name), tell me the exact collection path + field name and
-//       I'll swap ONE function (`_fetchShopPriceRange`) — nothing
-//       else needs to change.
-//
-// 2) RATING FILTER
-//    Your shop documents don't appear to store a rating field —
-//    ratings are computed live from the `shops/{shopId}/reviews`
-//    subcollection (see `_FirestoreShopRating` below, unchanged).
-//    So the filter first checks for a stored field in this order:
-//    `averageRating` -> `rating_average` -> `rating`. If none exist,
-//    it falls back to lazily computing the average from the reviews
-//    subcollection (same source your star-rating widget already
-//    uses), caches it per shop, and re-filters once it arrives.
-//
-// 3) OPEN / CLOSED FILTER
-//    Reuses your existing `open_time` / `close_time` fields (12-hour
-//    "h:mm AM/PM" format, matching your shopkeeper timing picker).
-//    Handles overnight ranges (e.g. 8:00 PM – 2:00 AM) correctly.
-//    If a shop has no timing fields, it's treated as "unknown" and
-//    is excluded only when the Open/Closed filter is active (never
-//    crashes, never shown as a false positive).
-//
-// 4) BILLING-SUSPENSION GATE (added — see notes inline below)
-//    This is NOT one of the toggleable advanced filters above. It is
-//    a mandatory gate applied unconditionally to every shop in the
-//    list, independent of _activeAdvancedFilterCount. It exists to
-//    close a gap: the shopkeeper-side auto-suspend write (in
-//    ShopkeeperBillingScreen) only used to fire when the shopkeeper's
-//    billing screen was open/refreshed. This gate reads the shop's
-//    active `rejected` billing cycle directly from Firestore and,
-//    once `due_time` has passed, treats the shop as suspended on the
-//    customer side too — even if `shops.status` hasn't been written
-//    to `'suspended'` yet. `shops.status` remains authoritative the
-//    moment it *does* update (this is only a bridge for the gap
-//    before that write lands). A per-shop one-shot Timer is scheduled
-//    so the list refreshes itself exactly at `due_time`, without the
-//    customer needing to manually reload.
-//
-// NOTE (this revision): the Filter Shops bottom sheet now only
-// exposes Distance and Rating controls. Price Range and
-// Availability (Open/Closed) have been removed from the UI only —
-// their underlying matching functions, caches, and the
-// _activeAdvancedFilterCount logic are all left untouched, per
-// request. Since the sheet no longer writes to _priceFilterActive /
-// _availabilityFilter, those simply stay at their inactive defaults
-// and never exclude a shop.
-//
-// No new packages are required — RangeSlider/ChoiceChip/RadioListTile
-// are all built into the Flutter SDK you already use.
+//  customer_dashboard.dart — NearBuy Customer Dashboard
 // ============================================================
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -87,6 +20,39 @@ import 'services/location_service.dart';
 import 'screens/map_screen.dart';
 import 'screens/my_orders_screen.dart';
 import 'nearbuy_theme.dart';
+
+// ─── Star Rating Row Widget ─────────────────────────────────
+class StarRatingRow extends StatelessWidget {
+  final double rating;
+  final int reviewCount;
+
+  const StarRatingRow({super.key, required this.rating, required this.reviewCount});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        ...List.generate(5, (i) {
+          if (i < rating.floor()) {
+            return const Icon(Icons.star_rounded, color: NearBuyColors.orange, size: 16);
+          } else if (i < rating.ceil() && rating % 1 >= 0.25) {
+            return const Icon(Icons.star_half_rounded, color: NearBuyColors.orange, size: 16);
+          } else {
+            return Icon(Icons.star_border_rounded, color: NearBuyColors.textHint, size: 16);
+          }
+        }),
+        const SizedBox(width: 6),
+        Text(
+          '${rating.toStringAsFixed(1)} ($reviewCount)',
+          style: GoogleFonts.poppins(
+            fontSize: 11,
+            color: NearBuyColors.textSecondary,
+          ),
+        ),
+      ],
+    );
+  }
+}
 
 class CustomerDashboard extends StatefulWidget {
   const CustomerDashboard({super.key});
@@ -104,33 +70,28 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   String? _displayName;
   bool _isUploading = false;
   String _selectedCategory = "All";
-  int _currentNavIndex = 0; // 0 = Shops, 1 = My Orders, 2 = Favorites
+  int _currentNavIndex = 0;
 
   late AnimationController _fadeCtrl;
   late Animation<double> _fadeAnim;
 
   // ─────────────────────────────────────────────────────────
-  // ADVANCED FILTERS — new state
+  // ADVANCED FILTERS
   // ─────────────────────────────────────────────────────────
   static const double _priceRangeMin = 0;
   static const double _priceRangeMax = 10000;
 
-  double? _distanceFilterKm; // null = All
+  double? _distanceFilterKm;
   RangeValues _priceFilter = const RangeValues(_priceRangeMin, _priceRangeMax);
-  bool _priceFilterActive = false; // becomes true only after user applies a non-default range
-  double _ratingFilterMin = 0; // 0 = All, 4.0, 4.5
-  String _availabilityFilter = 'All'; // 'All' | 'Open' | 'Closed'
+  bool _priceFilterActive = false;
+  double _ratingFilterMin = 0;
+  String _availabilityFilter = 'All';
 
-  // Lazy caches so we never re-fetch price/rating for the same shop twice.
-  final Map<String, RangeValues?> _shopPriceCache = {}; // null => known "no price data"
+  final Map<String, RangeValues?> _shopPriceCache = {};
   final Set<String> _shopPriceFetching = {};
-  final Map<String, double?> _shopRatingCache = {}; // null => known "no rating data"
+  final Map<String, double?> _shopRatingCache = {};
   final Set<String> _shopRatingFetching = {};
 
-  // ── FIX: mandatory suspension-by-grace-period check (NOT a toggleable
-  // filter — always applied, doesn't count toward _activeAdvancedFilterCount).
-  // true  = shop has a rejected billing cycle whose due_time has passed,
-  //         so treat as suspended even if shops.status hasn't caught up yet.
   final Map<String, bool> _shopBillingSuspendedCache = {};
   final Set<String> _shopBillingFetching = {};
   final Map<String, Timer?> _shopSuspensionTimers = {};
@@ -182,8 +143,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   @override
   void dispose() {
     _fadeCtrl.dispose();
-    // FIX: cancel any pending per-shop grace-period timers so we never
-    // call setState() after this widget is disposed.
     for (final t in _shopSuspensionTimers.values) {
       t?.cancel();
     }
@@ -191,12 +150,21 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   void _loadProfileData() async {
-    final doc = await FirebaseFirestore.instance.collection('users').doc(user?.uid).get();
-    if (doc.exists && mounted) {
-      setState(() {
-        _profileImageUrl = doc.data()?['profile_image'];
-        if (doc.data()?['name'] != null) _displayName = doc.data()?['name'];
-      });
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user?.uid)
+          .get();
+      
+      if (mounted && doc.exists) {
+        final data = doc.data();
+        setState(() {
+          _profileImageUrl = data?['profile_image'];
+          if (data?['name'] != null) _displayName = data?['name'];
+        });
+      }
+    } catch (e) {
+      debugPrint("Error loading profile data: $e");
     }
   }
 
@@ -206,35 +174,107 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       await FirebaseFirestore.instance.collection('users').doc(user?.uid).set(
         {'name': newName}, SetOptions(merge: true),
       );
-      setState(() => _displayName = newName);
-    } catch (e) { debugPrint("Update Name Error: $e"); }
+      if (mounted) {
+        setState(() => _displayName = newName);
+      }
+    } catch (e) { 
+      debugPrint("Update Name Error: $e"); 
+    }
   }
 
+  // ─── Profile Image Upload with Cloudinary ──────────────────
   Future<void> _pickAndUploadImage() async {
-    final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
-    if (pickedFile != null) {
-      setState(() => _isUploading = true);
-      try {
-        String cloudName = "your_cloud_name";
-        String uploadPreset = "your_preset";
-        var request = http.MultipartRequest(
-          'POST', Uri.parse('https://api.cloudinary.com/v1_1/$cloudName/image/upload'),
-        );
-        request.fields['upload_preset'] = uploadPreset;
-        request.files.add(await http.MultipartFile.fromPath('file', pickedFile.path));
-        var response = await request.send();
-        if (response.statusCode == 200) {
-          var responseData = await response.stream.toBytes();
-          var jsonRes = jsonDecode(String.fromCharCodes(responseData));
-          String url = jsonRes['secure_url'];
-          await FirebaseFirestore.instance.collection('users').doc(user?.uid)
-              .set({'profile_image': url}, SetOptions(merge: true));
-          setState(() => _profileImageUrl = url);
+    try {
+      final picker = ImagePicker();
+      final pickedFile = await picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 800,
+        maxHeight: 800,
+        imageQuality: 85,
+      );
+      
+      if (pickedFile == null) return;
+
+      final File imageFile = File(pickedFile.path);
+      final int fileSize = await imageFile.length();
+      if (fileSize > 5 * 1024 * 1024) {
+        if (mounted) {
+          _showSnackBar('Image size should be less than 5MB', Colors.red);
         }
-      } catch (e) { debugPrint("Upload Error: $e"); }
-      finally { setState(() => _isUploading = false); }
+        return;
+      }
+
+      if (!mounted) return;
+      setState(() => _isUploading = true);
+
+      // ─── Cloudinary Upload ──────────────────────────────────
+      // ⚠️ Replace with your Cloudinary cloud name
+      String cloudName = "dxzaqavfj"; 
+      String uploadPreset = "nearbuy_preset";
+      
+      var request = http.MultipartRequest(
+        'POST',
+        Uri.parse('https://api.cloudinary.com/v1_1/$cloudName/image/upload'),
+      );
+      
+      request.fields['upload_preset'] = uploadPreset;
+      request.files.add(await http.MultipartFile.fromPath('file', pickedFile.path));
+      
+      var response = await request.send();
+      
+      if (!mounted) {
+        setState(() => _isUploading = false);
+        return;
+      }
+
+      if (response.statusCode == 200) {
+        var responseData = await response.stream.toBytes();
+        var responseString = String.fromCharCodes(responseData);
+        var jsonRes = jsonDecode(responseString);
+        String url = jsonRes['secure_url'];
+        
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user?.uid)
+            .set(
+              {'profile_image': url},
+              SetOptions(merge: true),
+            );
+
+        if (mounted) {
+          setState(() {
+            _profileImageUrl = url;
+            _isUploading = false;
+          });
+          _showSnackBar('Profile photo updated!', Colors.green);
+        }
+      } else {
+        setState(() => _isUploading = false);
+        _showSnackBar('Failed to upload image. Please try again.', Colors.red);
+      }
+    } catch (e) {
+      debugPrint("Upload Error: $e");
+      if (mounted) {
+        setState(() => _isUploading = false);
+        _showSnackBar('Error uploading image: ${e.toString()}', Colors.red);
+      }
     }
+  }
+
+  void _showSnackBar(String message, Color color) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          style: GoogleFonts.poppins(color: Colors.white),
+        ),
+        backgroundColor: color,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        margin: const EdgeInsets.all(16),
+        duration: const Duration(seconds: 3),
+      ),
+    );
   }
 
   void _showProfileDialog() {
@@ -260,7 +300,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
             )),
             const SizedBox(height: 20),
             GestureDetector(
-              onTap: _pickAndUploadImage,
+              onTap: _isUploading ? null : _pickAndUploadImage,
               child: Stack(
                 children: [
                   CircleAvatar(
@@ -271,20 +311,34 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                         ? Icon(Icons.person_rounded, size: 48, color: NearBuyColors.navy)
                         : null,
                   ),
-                  Positioned(
-                    bottom: 0, right: 0,
-                    child: Container(
-                      padding: const EdgeInsets.all(6),
-                      decoration: BoxDecoration(
-                        color: NearBuyColors.orange,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 2),
-                      ),
-                      child: const Icon(Icons.camera_alt_rounded, size: 14, color: Colors.white),
-                    ),
-                  ),
                   if (_isUploading)
-                    const Positioned.fill(child: CircularProgressIndicator()),
+                    Positioned.fill(
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.3),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Center(
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 3,
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (!_isUploading)
+                    Positioned(
+                      bottom: 0, right: 0,
+                      child: Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          color: NearBuyColors.orange,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 2),
+                        ),
+                        child: const Icon(Icons.camera_alt_rounded, size: 14, color: Colors.white),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -350,14 +404,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                     onPressed: () {
                       _updateName(nameController.text);
                       Navigator.pop(ctx);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Profile updated!', style: GoogleFonts.poppins()),
-                          backgroundColor: NearBuyColors.success,
-                          behavior: SnackBarBehavior.floating,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        ),
-                      );
+                      _showSnackBar('Profile updated!', NearBuyColors.success);
                     },
                     child: const Text('Save Changes'),
                   ),
@@ -408,25 +455,14 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     ) / 1000;
   }
 
-  // ─────────────────────────────────────────────────────────
-  // ADVANCED FILTERS — helper logic
-  // ─────────────────────────────────────────────────────────
-
-  /// Distance filter — reuses existing `_currentPosition` / `_distance()`.
-  /// If location isn't available and a distance filter is selected, the
-  /// filter is simply not applied (nothing crashes); the filter sheet
-  /// itself shows a message asking the user to enable location.
   bool _matchesDistanceFilter(Map<String, dynamic> data) {
     if (_distanceFilterKm == null) return true;
-    if (_currentPosition == null) return true; // graceful no-op, see note above
+    if (_currentPosition == null) return true;
     final dist = _distance(data);
-    if (dist <= 0) return true; // shop has no lat/lng — don't hide it, just can't rank it
+    if (dist <= 0) return true;
     return dist <= _distanceFilterKm!;
   }
 
-  /// Rating filter — checks common stored field names first; falls back to
-  /// a lazily-cached average computed from the reviews subcollection
-  /// (same source as `_FirestoreShopRating`). Never crashes if missing.
   bool _matchesRatingFilter(String shopId, Map<String, dynamic> data) {
     if (_ratingFilterMin <= 0) return true;
 
@@ -437,12 +473,12 @@ class _CustomerDashboardState extends State<CustomerDashboard>
 
     if (_shopRatingCache.containsKey(shopId)) {
       final cached = _shopRatingCache[shopId];
-      if (cached == null) return false; // known: no reviews / no rating yet
+      if (cached == null) return false;
       return cached >= _ratingFilterMin;
     }
 
     _fetchShopRatingIfNeeded(shopId);
-    return false; // exclude until cached value arrives, then list re-filters automatically
+    return false;
   }
 
   void _fetchShopRatingIfNeeded(String shopId) {
@@ -469,9 +505,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     });
   }
 
-  /// Price filter — see the note block at the top of this file for the
-  /// exact assumptions. Cheap path uses shop-level min/max fields if
-  /// present; otherwise lazily queries a top-level `products` collection.
   bool _matchesPriceFilter(String shopId, Map<String, dynamic> data) {
     if (!_priceFilterActive) return true;
 
@@ -486,12 +519,12 @@ class _CustomerDashboardState extends State<CustomerDashboard>
 
     if (_shopPriceCache.containsKey(shopId)) {
       final cached = _shopPriceCache[shopId];
-      if (cached == null) return false; // known: no product price data available
+      if (cached == null) return false;
       return _rangesOverlap(cached.start, cached.end, _priceFilter.start, _priceFilter.end);
     }
 
     _fetchShopPriceRange(shopId);
-    return false; // exclude until cached value arrives, then list re-filters automatically
+    return false;
   }
 
   bool _rangesOverlap(double aStart, double aEnd, double bStart, double bEnd) {
@@ -501,9 +534,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   void _fetchShopPriceRange(String shopId) {
     if (_shopPriceFetching.contains(shopId)) return;
     _shopPriceFetching.add(shopId);
-    // ASSUMPTION: top-level `products` collection with a `shopId` field
-    // and a numeric `price` field. Swap this query if your real schema
-    // differs (see note block at the top of this file).
     FirebaseFirestore.instance
         .collection('products')
         .where('shopId', isEqualTo: shopId)
@@ -529,24 +559,19 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     });
   }
 
-  /// Open/Closed filter — reuses existing `open_time` / `close_time`
-  /// string fields ("h:mm AM/PM"). Handles overnight ranges. If a shop
-  /// has no timing data, it's excluded only while this filter is active.
   bool _matchesAvailabilityFilter(Map<String, dynamic> data) {
     if (_availabilityFilter == 'All') return true;
     final openTime = data['open_time'];
     final closeTime = data['close_time'];
     if (openTime == null || closeTime == null ||
         openTime.toString().isEmpty || closeTime.toString().isEmpty) {
-      return false; // unknown timing — can't confirm, so exclude rather than guess
+      return false;
     }
     final isOpen = _isShopOpenNow(openTime.toString(), closeTime.toString());
-    if (isOpen == null) return false; // unparseable time string
+    if (isOpen == null) return false;
     return _availabilityFilter == 'Open' ? isOpen : !isOpen;
   }
 
-  /// Parses "h:mm AM/PM" into minutes-since-midnight. Returns null if the
-  /// string can't be parsed, so callers can fail gracefully.
   int? _parseTimeToMinutes(String raw) {
     final match = RegExp(r'^(\d{1,2}):(\d{2})\s*([AaPp][Mm])$').firstMatch(raw.trim());
     if (match == null) return null;
@@ -558,8 +583,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     return hour * 60 + minute;
   }
 
-  /// Returns true if open, false if closed, null if times couldn't be parsed.
-  /// Correctly handles shops whose hours cross midnight (e.g. 8 PM – 2 AM).
   bool? _isShopOpenNow(String openTimeStr, String closeTimeStr) {
     final openMin = _parseTimeToMinutes(openTimeStr);
     final closeMin = _parseTimeToMinutes(closeTimeStr);
@@ -568,26 +591,20 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     final now = TimeOfDay.now();
     final nowMin = now.hour * 60 + now.minute;
 
-    if (openMin == closeMin) return true; // 24-hour shop
+    if (openMin == closeMin) return true;
     if (closeMin > openMin) {
-      // Same-day range, e.g. 9:00 AM - 9:00 PM
       return nowMin >= openMin && nowMin < closeMin;
     } else {
-      // Crosses midnight, e.g. 8:00 PM - 2:00 AM
       return nowMin >= openMin || nowMin < closeMin;
     }
   }
 
-  // ─────────────────────────────────────────────────────────
-  // GRACE-PERIOD SUSPENSION CHECK (mandatory, not a toggleable filter)
-  // ─────────────────────────────────────────────────────────
-  // See the note block at the top of this file for why this exists.
   bool _isShopSuspendedByGracePeriod(String shopId) {
     if (_shopBillingSuspendedCache.containsKey(shopId)) {
       return _shopBillingSuspendedCache[shopId] ?? false;
     }
     _fetchShopBillingSuspensionIfNeeded(shopId);
-    return false; // don't hide before we actually know
+    return false;
   }
 
   void _fetchShopBillingSuspensionIfNeeded(String shopId) {
@@ -608,9 +625,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           if (DateTime.now().isAfter(dueDate)) {
             suspended = true;
           } else {
-            // Not expired yet — schedule a one-shot timer so the list
-            // refreshes itself exactly at due_time, without the customer
-            // needing to manually reload.
             _scheduleSuspensionTimer(shopId, dueDate);
           }
         }
@@ -631,8 +645,10 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       return;
     }
     _shopSuspensionTimers[shopId] = Timer(delay, () {
-      _shopBillingSuspendedCache[shopId] = true;
-      if (mounted) setState(() {});
+      if (mounted) {
+        _shopBillingSuspendedCache[shopId] = true;
+        setState(() {});
+      }
     });
   }
 
@@ -643,24 +659,18 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       _priceFilterActive = false;
       _ratingFilterMin = 0;
       _availabilityFilter = 'All';
-      // Category is intentionally left untouched — it's a separate
-      // selection (category chips), not part of the advanced filters.
     });
   }
 
-  // ─── Bottom Nav tap handler ──────────────────────────────
   void _onNavTap(int index) {
     if (index == 1) {
-      // My Orders — navigate to screen
       Navigator.push(context, MaterialPageRoute(builder: (_) => const MyOrdersScreen()));
       return;
     }
     if (index == 2) {
-      // Favorites — navigate to wishlist
-      Navigator.push(context, MaterialPageRoute(builder: (_) => const _WishlistScreen()));
+      Navigator.push(context, MaterialPageRoute(builder: (_) => const WishlistScreen()));
       return;
     }
-    // index == 0 => Shops (stay on this page)
     setState(() => _currentNavIndex = 0);
   }
 
@@ -681,7 +691,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           ],
         ),
       ),
-      // ─── Bottom Navigation Bar ───────────────────────────
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
           color: Colors.white,
@@ -699,21 +708,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
-                _buildNavItem(
-                  index: 0,
-                  icon: Icons.store_rounded,
-                  label: 'Shops',
-                ),
-                _buildNavItem(
-                  index: 1,
-                  icon: Icons.receipt_long_rounded,
-                  label: 'Order History',
-                ),
-                _buildNavItem(
-                  index: 2,
-                  icon: Icons.favorite_rounded,
-                  label: 'Favorites',
-                ),
+                _buildNavItem(index: 0, icon: Icons.store_rounded, label: 'Shops'),
+                _buildNavItem(index: 1, icon: Icons.receipt_long_rounded, label: 'Order History'),
+                _buildNavItem(index: 2, icon: Icons.favorite_rounded, label: 'Favorites'),
               ],
             ),
           ),
@@ -722,7 +719,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     );
   }
 
-  // ─── Bottom Nav Item ─────────────────────────────────────
   Widget _buildNavItem({required int index, required IconData icon, required String label}) {
     final isSelected = _currentNavIndex == index;
     return GestureDetector(
@@ -737,11 +733,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              icon,
-              size: 24,
-              color: isSelected ? NearBuyColors.navy : NearBuyColors.textSecondary,
-            ),
+            Icon(icon, size: 24, color: isSelected ? NearBuyColors.navy : NearBuyColors.textSecondary),
             const SizedBox(height: 4),
             Text(
               label,
@@ -884,7 +876,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     );
   }
 
-  // ─── Filter button (with active-count badge) ────────────
   Widget _buildFilterButton() {
     final count = _activeAdvancedFilterCount;
     return GestureDetector(
@@ -932,9 +923,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     );
   }
 
-  // ─── Filter bottom sheet ─────────────────────────────────
   void _showFilterSheet() {
-    // Local temp state so Reset/Cancel don't affect the list until Apply.
     double? tempDistance = _distanceFilterKm;
     double tempRating = _ratingFilterMin;
 
@@ -986,7 +975,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                     ),
                     const SizedBox(height: 8),
 
-                    // ── Distance
                     _filterSectionLabel('📍 Distance'),
                     if (_currentPosition == null)
                       Container(
@@ -1035,7 +1023,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                     ),
                     const SizedBox(height: 20),
 
-                    // ── Rating
                     _filterSectionLabel('⭐ Rating'),
                     Wrap(
                       spacing: 8, runSpacing: 8,
@@ -1065,7 +1052,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                     ),
                     const SizedBox(height: 24),
 
-                    // ── Reset / Apply
                     Row(
                       children: [
                         Expanded(
@@ -1222,20 +1208,14 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         var docs = snapshot.data!.docs.where((doc) {
           final data = doc.data() as Map<String, dynamic>;
           if (!_isBillingAllowed(data)) return false;
-          // FIX: mandatory grace-period suspension gate — independent of
-          // whether the shopkeeper's app is open/refreshed. See note block
-          // at the top of this file.
           if (_isShopSuspendedByGracePeriod(doc.id)) return false;
           final name = (data['shop_name'] ?? '').toString().toLowerCase();
           if (_searchText.isNotEmpty && !name.contains(_searchText)) return false;
           if (_selectedCategory != 'All') {
-            // Firestore shop doc stores the category under 'category',
-            // but some older docs may still use 'shop_category' — check both
-            // so filtering keeps working regardless of which field is set.
-            final cat = (data['category'] ?? data['shop_category'] ?? '').toString();
-            if (cat != _selectedCategory) return false;
+            final cat = (data['category'] ?? data['shop_category'] ?? '').toString().trim();
+            final selectedCat = _selectedCategory.trim();
+            if (!cat.toLowerCase().contains(selectedCat.toLowerCase())) return false;
           }
-          // ── Advanced filters (distance / price / rating / open-closed) ──
           if (!_matchesDistanceFilter(data)) return false;
           if (!_matchesPriceFilter(doc.id, data)) return false;
           if (!_matchesRatingFilter(doc.id, data)) return false;
@@ -1300,7 +1280,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       child: SafeArea(
         child: Column(
           children: [
-            // Header
             Container(
               width: double.infinity,
               padding: const EdgeInsets.fromLTRB(20, 28, 20, 28),
@@ -1314,7 +1293,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   GestureDetector(
-                    onTap: _pickAndUploadImage,
+                    onTap: _isUploading ? null : _pickAndUploadImage,
                     child: Stack(
                       children: [
                         CircleAvatar(
@@ -1330,17 +1309,34 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                                 )
                               : null,
                         ),
-                        Positioned(
-                          bottom: 0, right: 0,
-                          child: Container(
-                            padding: const EdgeInsets.all(4),
-                            decoration: BoxDecoration(
-                              color: NearBuyColors.orange, shape: BoxShape.circle,
-                              border: Border.all(color: Colors.white, width: 2),
+                        if (_isUploading)
+                          Positioned.fill(
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: Colors.black.withOpacity(0.3),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Center(
+                                child: CircularProgressIndicator(
+                                  color: Colors.white,
+                                  strokeWidth: 3,
+                                ),
+                              ),
                             ),
-                            child: const Icon(Icons.camera_alt_rounded, size: 12, color: Colors.white),
                           ),
-                        ),
+                        if (!_isUploading)
+                          Positioned(
+                            bottom: 0, right: 0,
+                            child: Container(
+                              padding: const EdgeInsets.all(4),
+                              decoration: BoxDecoration(
+                                color: NearBuyColors.orange,
+                                shape: BoxShape.circle,
+                                border: Border.all(color: Colors.white, width: 2),
+                              ),
+                              child: const Icon(Icons.camera_alt_rounded, size: 12, color: Colors.white),
+                            ),
+                          ),
                       ],
                     ),
                   ),
@@ -1369,7 +1365,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
             }),
             _drawerItem(Icons.favorite_border_rounded, 'Favorites', () {
               Navigator.pop(context);
-              Navigator.push(context, MaterialPageRoute(builder: (_) => const _WishlistScreen()));
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const WishlistScreen()));
             }),
             _drawerItem(Icons.map_outlined, 'Explore Map', () {
               Navigator.pop(context);
@@ -1454,25 +1450,11 @@ class _ShopCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final shopName = data['shop_name'] ?? 'Unknown Shop';
-
-    // ── Address: Firestore mein 'shop_location' field hai
-    final address = data['shop_location']
-        ?? data['address']
-        ?? data['location']
-        ?? 'Address not available';
-
+    final address = data['shop_location'] ?? data['address'] ?? data['location'] ?? 'Address not available';
     final openTime  = data['open_time']  ?? '';
     final closeTime = data['close_time'] ?? '';
-
-    // ── Shop image from Firestore
-    final imageUrl = data['shop_image'] as String?
-        ?? data['shop_image_url'] as String?;
-
-    // ── Reviews: fetched live from Firestore sub-collection
+    final imageUrl = data['shop_image'] as String? ?? data['shop_image_url'] as String?;
     final distText = distance > 0 ? '${distance.toStringAsFixed(1)} km' : '';
-
-    // ── Category: Firestore shop doc uses 'category', with 'shop_category'
-    // kept as a fallback for older documents.
     final categoryLabel = data['category'] ?? data['shop_category'] ?? 'Shop';
 
     return GestureDetector(
@@ -1497,7 +1479,6 @@ class _ShopCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Image area (Firestore se fetch hoti hai)
             Stack(
               children: [
                 ClipRRect(
@@ -1512,7 +1493,6 @@ class _ShopCard extends StatelessWidget {
                         )
                       : _placeholderImage(),
                 ),
-                // Distance badge
                 if (distText.isNotEmpty)
                   Positioned(
                     top: 12, right: 12,
@@ -1534,7 +1514,6 @@ class _ShopCard extends StatelessWidget {
                       ),
                     ),
                   ),
-                // Category chip
                 Positioned(
                   top: 12, left: 12,
                   child: Container(
@@ -1554,7 +1533,6 @@ class _ShopCard extends StatelessWidget {
                 ),
               ],
             ),
-            // Info area
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
               child: Column(
@@ -1567,7 +1545,6 @@ class _ShopCard extends StatelessWidget {
                           fontSize: 15, fontWeight: FontWeight.w700, color: NearBuyColors.textPrimary,
                         )),
                       ),
-                      // Verified badge
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                         decoration: BoxDecoration(
@@ -1587,7 +1564,6 @@ class _ShopCard extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 6),
-                  // ── Address from Firestore
                   Row(
                     children: [
                       Icon(Icons.location_on_rounded, size: 13, color: NearBuyColors.orange),
@@ -1600,7 +1576,6 @@ class _ShopCard extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 8),
-                  // ── Reviews from Firestore (StreamBuilder)
                   Row(
                     children: [
                       _FirestoreShopRating(shopId: shopId),
@@ -1628,7 +1603,8 @@ class _ShopCard extends StatelessWidget {
 
   Widget _placeholderImage() {
     return Container(
-      height: 120,
+      height: 140,
+      width: double.infinity,
       color: NearBuyColors.navy.withOpacity(0.05),
       child: Center(
         child: Text(_categoryEmoji, style: const TextStyle(fontSize: 48)),
@@ -1637,7 +1613,7 @@ class _ShopCard extends StatelessWidget {
   }
 }
 
-// ─── Firestore Shop Rating Widget (reviews subcollection se) ───
+// ─── Firestore Shop Rating Widget ──────────────────────────
 class _FirestoreShopRating extends StatelessWidget {
   final String shopId;
   const _FirestoreShopRating({required this.shopId});
@@ -1668,13 +1644,19 @@ class _FirestoreShopRating extends StatelessWidget {
   }
 }
 
-// ─── Wishlist / Favorites Screen (inline) ──────────────────
-class _WishlistScreen extends StatelessWidget {
-  const _WishlistScreen();
+// ─── Wishlist / Favorites Screen ──────────────────────────
+class WishlistScreen extends StatefulWidget {
+  const WishlistScreen({super.key});
+
+  @override
+  State<WishlistScreen> createState() => _WishlistScreenState();
+}
+
+class _WishlistScreenState extends State<WishlistScreen> {
+  final user = FirebaseAuth.instance.currentUser;
 
   @override
   Widget build(BuildContext context) {
-    final user = FirebaseAuth.instance.currentUser;
     return Scaffold(
       backgroundColor: NearBuyColors.cream,
       appBar: AppBar(

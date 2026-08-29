@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:http/http.dart' as http;
@@ -58,7 +59,7 @@ class _AddProductPageState extends State<AddProductPage>
   bool    _imageMissing  = false;
   final   picker         = ImagePicker();
   
-  // ── New controllers for tracking ──
+  // ── Controllers for tracking ──
   final _nameFocusNode = FocusNode();
   final _descFocusNode = FocusNode();
   final _priceFocusNode = FocusNode();
@@ -80,7 +81,9 @@ class _AddProductPageState extends State<AddProductPage>
     if (widget.editData != null) {
       _nameController.text  = widget.editData!['name']        ?? '';
       _descController.text  = widget.editData!['description'] ?? '';
-      _priceController.text = (widget.editData!['price'] ?? '').toString();
+      // Price is now stored as integer
+      final price = widget.editData!['price'] ?? 0;
+      _priceController.text = price > 0 ? price.toString() : '';
       _quantityController.text = (widget.editData!['quantity'] ?? 0).toString();
       _imageUrl             = widget.editData!['image_url'];
     }
@@ -98,6 +101,7 @@ class _AddProductPageState extends State<AddProductPage>
     // Add listeners for character counting
     _nameController.addListener(() => setState(() {}));
     _descController.addListener(() => setState(() {}));
+    _quantityController.addListener(() => setState(() {}));
   }
 
   @override
@@ -115,7 +119,7 @@ class _AddProductPageState extends State<AddProductPage>
   }
 
   // ══════════════════════════════════════════════════
-  // LOGIC
+  // HELPERS
   // ══════════════════════════════════════════════════
 
   // ── Image Picker with Camera & Gallery ──
@@ -278,56 +282,63 @@ class _AddProductPageState extends State<AddProductPage>
       _showSnack('Product name cannot exceed 50 characters', _NB.red);
       return false;
     }
-    // Validate only reasonable characters
     final RegExp validNameRegex = RegExp(r'^[a-zA-Z0-9\s\-\.\(\)&]+$');
     if (!validNameRegex.hasMatch(name)) {
       _showSnack('Product name contains invalid characters', _NB.red);
       return false;
     }
 
-    // 3. Description validation (optional but length check if entered)
+    // 3. Description validation
     final String desc = _descController.text.trim();
     if (desc.isNotEmpty && desc.length > 200) {
       _showSnack('Description cannot exceed 200 characters', _NB.red);
       return false;
     }
 
-    // 4. Category validation - you already have category selection
-    // (Assuming you have category dropdown - will add in UI)
-
-    // 5. Quantity validation
-    final String qtyText = _quantityController.text.trim();
-    if (qtyText.isEmpty) {
-      _showSnack('Quantity is required', _NB.red);
-      return false;
-    }
-    final int? quantity = int.tryParse(qtyText);
-    if (quantity == null) {
-      _showSnack('Please enter a valid whole number for quantity', _NB.red);
-      return false;
-    }
-    if (quantity < 0) {
-      _showSnack('Quantity cannot be negative', _NB.red);
-      return false;
-    }
-    if (quantity > 9999) {
-      _showSnack('Maximum quantity is 9999', _NB.red);
-      return false;
-    }
-
-    // 6. Price validation
+    // ── 4. PRICE VALIDATION (Whole number only) ──
     final String priceText = _priceController.text.trim();
     if (priceText.isEmpty) {
       _showSnack('Price is required', _NB.red);
       return false;
     }
-    final double? price = double.tryParse(priceText);
-    if (price == null || price < 0) {
-      _showSnack('Please enter a valid price', _NB.red);
+    
+    // Parse price as integer
+    final int? price = int.tryParse(priceText);
+    if (price == null) {
+      _showSnack('Please enter a valid whole number for price', _NB.red);
       return false;
     }
-    if (price > 9999999.99) {
-      _showSnack('Maximum price is 99,99,999.99', _NB.red);
+    
+    // Check price range: must be >= 1 and <= 999999
+    if (price < 1) {
+      _showSnack('Price must be at least PKR 1', _NB.red);
+      return false;
+    }
+    if (price > 999999) {
+      _showSnack('Maximum price is PKR 999,999', _NB.red);
+      return false;
+    }
+
+    // ── 5. QUANTITY VALIDATION ──
+    final String qtyText = _quantityController.text.trim();
+    if (qtyText.isEmpty) {
+      _showSnack('Quantity is required', _NB.red);
+      return false;
+    }
+    
+    final int? quantity = int.tryParse(qtyText);
+    if (quantity == null) {
+      _showSnack('Please enter a valid whole number for quantity', _NB.red);
+      return false;
+    }
+    
+    // Check quantity range
+    if (quantity < 0) {
+      _showSnack('Quantity cannot be negative', _NB.red);
+      return false;
+    }
+    if (quantity > 9999) {
+      _showSnack('Maximum quantity is 9,999', _NB.red);
       return false;
     }
 
@@ -353,17 +364,34 @@ class _AddProductPageState extends State<AddProductPage>
         }
       }
 
-      // ── Get quantity and auto-calculate stock status ──
+      // ── SAFELY PARSE PRICE (Integer only) ──
+      final int price = int.tryParse(_priceController.text.trim()) ?? 0;
+      // Validate price range (do NOT silently clamp)
+      if (price < 1 || price > 999999) {
+        setState(() => _loading = false);
+        _showSnack('Invalid price value', _NB.red);
+        return;
+      }
+      
+      // ── SAFELY PARSE QUANTITY ──
       final int quantity = int.tryParse(_quantityController.text.trim()) ?? 0;
+      // Validate quantity range (do NOT silently clamp)
+      if (quantity < 0 || quantity > 9999) {
+        setState(() => _loading = false);
+        _showSnack('Invalid quantity value', _NB.red);
+        return;
+      }
+      
+      // ── AUTO-CALCULATE STOCK STATUS ──
       final bool isOutOfStock = quantity <= 0;
 
       // ── Prepare data with existing field names ──
       final Map<String, dynamic> data = {
         'name': _nameController.text.trim(),
         'description': _descController.text.trim(),
-        'price': double.tryParse(_priceController.text.trim()) ?? 0.0,
-        'quantity': quantity,
-        'out_of_stock': isOutOfStock,  // Auto-calculated from quantity
+        'price': price, // Store as integer
+        'quantity': quantity, // Store as int
+        'out_of_stock': isOutOfStock, // Auto-calculated from quantity
         'image_url': _imageUrl,
         'updated_at': Timestamp.now(),
       };
@@ -380,7 +408,7 @@ class _AddProductPageState extends State<AddProductPage>
           .collection('products');
 
       if (widget.editProductId != null) {
-        // Update existing product - only changed fields
+        // Update existing product
         await collection.doc(widget.editProductId).update(data);
         if (mounted) {
           _showSnack('Product updated successfully!', _NB.green);
@@ -521,14 +549,12 @@ class _AddProductPageState extends State<AddProductPage>
     IconData? icon,
     Widget? prefixWidget,
     String? hint,
-    Widget? suffix,
   }) {
     return InputDecoration(
       labelText: label,
       hintText: hint,
       prefixIcon: prefixWidget ??
           Icon(icon, color: _NB.orange, size: 20),
-      suffix: suffix,
       floatingLabelStyle: const TextStyle(
         color: _NB.navy, fontWeight: FontWeight.w600,
       ),
@@ -1110,10 +1136,6 @@ class _AddProductPageState extends State<AddProductPage>
                               focusNode: _nameFocusNode,
                               textCapitalization: TextCapitalization.words,
                               maxLength: 50,
-                              // ✅ FIX — hides Flutter's built-in counter so
-                              // only the custom counter below is shown
-                              // (previously both were rendering, causing the
-                              // duplicated "0/50" text in the UI).
                               buildCounter: (context,
                                       {required currentLength,
                                       required isFocused,
@@ -1124,40 +1146,30 @@ class _AddProductPageState extends State<AddProductPage>
                                 icon: Icons.label_outline,
                                 hint: 'e.g. Fresh Apples (1kg)',
                               ),
-                              onChanged: (value) {
-                                // Trim extra spaces
-                                if (value != value.trim()) {
-                                  _nameController.value = TextEditingValue(
-                                    text: value.trim(),
-                                    selection: TextSelection.collapsed(
-                                      offset: value.trim().length,
-                                    ),
-                                  );
-                                }
-                              },
+                              // REMOVED: onChanged trimming that was breaking spaces
                               validator: (v) {
                                 if (v == null || v.trim().isEmpty) {
                                   return 'Product name is required';
                                 }
-                                if (v.trim().length < 2) {
+                                final trimmed = v.trim();
+                                if (trimmed.length < 2) {
                                   return 'Minimum 2 characters required';
                                 }
-                                if (v.trim().length > 50) {
+                                if (trimmed.length > 50) {
                                   return 'Maximum 50 characters allowed';
                                 }
                                 return null;
                               },
                             ),
-                            // Character counter
                             Padding(
                               padding: const EdgeInsets.only(top: 4, right: 4),
                               child: Align(
                                 alignment: Alignment.centerRight,
                                 child: Text(
-                                  '${_nameController.text.trim().length}/50',
+                                  '${_nameController.text.length}/50',
                                   style: TextStyle(
                                     fontSize: 12,
-                                    color: _nameController.text.trim().length > 50
+                                    color: _nameController.text.length > 50
                                         ? _NB.red
                                         : _NB.textGrey,
                                     fontWeight: FontWeight.w500,
@@ -1178,10 +1190,6 @@ class _AddProductPageState extends State<AddProductPage>
                               focusNode: _descFocusNode,
                               maxLines: 3,
                               maxLength: 200,
-                              // ✅ FIX — hides Flutter's built-in counter so
-                              // only the custom counter below is shown
-                              // (previously both were rendering, causing the
-                              // duplicated "0/200" text in the UI).
                               buildCounter: (context,
                                       {required currentLength,
                                       required isFocused,
@@ -1199,16 +1207,15 @@ class _AddProductPageState extends State<AddProductPage>
                                 return null;
                               },
                             ),
-                            // Character counter
                             Padding(
                               padding: const EdgeInsets.only(top: 4, right: 4),
                               child: Align(
                                 alignment: Alignment.centerRight,
                                 child: Text(
-                                  '${_descController.text.trim().length}/200',
+                                  '${_descController.text.length}/200',
                                   style: TextStyle(
                                     fontSize: 12,
-                                    color: _descController.text.trim().length > 200
+                                    color: _descController.text.length > 200
                                         ? _NB.red
                                         : _NB.textGrey,
                                     fontWeight: FontWeight.w500,
@@ -1220,48 +1227,86 @@ class _AddProductPageState extends State<AddProductPage>
                         ),
                         const SizedBox(height: 14),
 
-                        // ── Price ──
-                        TextFormField(
-                          controller: _priceController,
-                          focusNode: _priceFocusNode,
-                          keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true),
-                          decoration: _inputDec(
-                            label: 'Price (Rs.) *',
-                            prefixWidget: Container(
-                              alignment: Alignment.center,
-                              width: 40,
-                              child: const Text(
-                                'Rs.',
-                                style: TextStyle(
-                                  color: _NB.orange,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 15,
+                        // ── PRICE FIELD (Whole number only, NO DECIMAL) ──
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            TextFormField(
+                              controller: _priceController,
+                              focusNode: _priceFocusNode,
+                              keyboardType: TextInputType.number,
+                              inputFormatters: [
+                                // Allow only digits
+                                FilteringTextInputFormatter.digitsOnly,
+                                // Limit to 6 digits (max 999999)
+                                LengthLimitingTextInputFormatter(6),
+                              ],
+                              decoration: _inputDec(
+                                label: 'Price (Rs.) *',
+                                prefixWidget: Container(
+                                  alignment: Alignment.center,
+                                  width: 40,
+                                  child: const Text(
+                                    'Rs.',
+                                    style: TextStyle(
+                                      color: _NB.orange,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 15,
+                                    ),
+                                  ),
                                 ),
+                                hint: 'e.g. 150 or 500',
+                              ),
+                              validator: (v) {
+                                if (v == null || v.trim().isEmpty) {
+                                  return 'Price is required';
+                                }
+                                final trimmed = v.trim();
+                                final price = int.tryParse(trimmed);
+                                if (price == null) {
+                                  return 'Enter a valid whole number';
+                                }
+                                if (price < 1) {
+                                  return 'Price must be at least PKR 1';
+                                }
+                                if (price > 999999) {
+                                  return 'Maximum price is PKR 999,999';
+                                }
+                                return null;
+                              },
+                            ),
+                            const SizedBox(height: 6),
+                            // ── Price Range Helper (Responsive, no overflow) ──
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: _NB.bg,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.info_outline,
+                                      size: 12, color: _NB.textGrey),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(
+                                      'Price must be between PKR 1 and PKR 999,999',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        color: _NB.textGrey,
+                                      ),
+                                      overflow: TextOverflow.visible,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                            hint: 'e.g. 150',
-                          ),
-                          validator: (v) {
-                            if (v == null || v.trim().isEmpty) {
-                              return 'Price is required';
-                            }
-                            final price = double.tryParse(v.trim());
-                            if (price == null) {
-                              return 'Enter a valid price';
-                            }
-                            if (price < 0) {
-                              return 'Price cannot be negative';
-                            }
-                            if (price > 9999999.99) {
-                              return 'Maximum price is 99,99,999.99';
-                            }
-                            return null;
-                          },
+                          ],
                         ),
                         const SizedBox(height: 14),
 
-                        // ── Quantity ──
+                        // ── QUANTITY FIELD ──
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -1269,16 +1314,27 @@ class _AddProductPageState extends State<AddProductPage>
                               controller: _quantityController,
                               focusNode: _quantityFocusNode,
                               keyboardType: TextInputType.number,
+                              inputFormatters: [
+                                // Allow only digits
+                                FilteringTextInputFormatter.digitsOnly,
+                                // Limit to 4 digits (max 9999)
+                                LengthLimitingTextInputFormatter(4),
+                              ],
                               decoration: _inputDec(
                                 label: 'Quantity *',
                                 icon: Icons.numbers_outlined,
                                 hint: 'e.g. 10 (0 for out of stock)',
                               ),
+                              onChanged: (value) {
+                                // Update the UI to reflect stock status
+                                setState(() {});
+                              },
                               validator: (v) {
                                 if (v == null || v.trim().isEmpty) {
                                   return 'Quantity is required';
                                 }
-                                final quantity = int.tryParse(v.trim());
+                                final trimmed = v.trim();
+                                final quantity = int.tryParse(trimmed);
                                 if (quantity == null) {
                                   return 'Enter a valid whole number';
                                 }
@@ -1286,7 +1342,7 @@ class _AddProductPageState extends State<AddProductPage>
                                   return 'Quantity cannot be negative';
                                 }
                                 if (quantity > 9999) {
-                                  return 'Maximum quantity is 9999';
+                                  return 'Maximum quantity is 9,999';
                                 }
                                 return null;
                               },
@@ -1297,7 +1353,7 @@ class _AddProductPageState extends State<AddProductPage>
                             Builder(
                               builder: (context) {
                                 final qtyText = _quantityController.text.trim();
-                                final qty = int.tryParse(qtyText);
+                                final qty = qtyText.isEmpty ? null : int.tryParse(qtyText);
                                 String statusText;
                                 Color statusColor;
                                 Color statusBg;
@@ -1358,10 +1414,13 @@ class _AddProductPageState extends State<AddProductPage>
                                 Icon(Icons.info_outline,
                                     size: 12, color: _NB.textGrey),
                                 const SizedBox(width: 4),
-                                const Text(
-                                  'Stock status is automatically determined by quantity',
-                                  style: TextStyle(
-                                      fontSize: 10, color: _NB.textGrey),
+                                Expanded(
+                                  child: Text(
+                                    'Stock status is automatically determined by quantity',
+                                    style: TextStyle(
+                                        fontSize: 10, color: _NB.textGrey),
+                                    overflow: TextOverflow.visible,
+                                  ),
                                 ),
                               ],
                             ),

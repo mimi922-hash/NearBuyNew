@@ -45,7 +45,8 @@ class _ShopkeeperOrdersScreenState extends State<ShopkeeperOrdersScreen>
         .snapshots();
   }
 
-  // ── 🔥 Stock Deduction with Transaction (FIXED: all reads before all writes) ──
+  // ── 🔥 Stock Deduction with Transaction (ALL READS BEFORE ALL WRITES) ──
+  // Modified: Now sets status to 'confirmed' instead of 'delivered'
   Future<void> _deductStockForOrder(String orderId, List<dynamic> items) async {
     final FirebaseFirestore firestore = FirebaseFirestore.instance;
 
@@ -66,9 +67,9 @@ class _ShopkeeperOrdersScreenState extends State<ShopkeeperOrdersScreen>
           throw Exception('Stock already deducted for this order');
         }
 
-        // Check if order status is already delivered
-        if (orderData['status'] == 'delivered') {
-          throw Exception('Order already delivered');
+        // Check if order is still pending
+        if (orderData['status'] != 'pending') {
+          throw Exception('Order is not pending. Current status: ${orderData['status']}');
         }
 
         // Read all product docs first, keep refs + computed values in memory
@@ -127,11 +128,11 @@ class _ShopkeeperOrdersScreenState extends State<ShopkeeperOrdersScreen>
           });
         }
 
-        // Mark order as stock deducted and delivered
+        // ── MODIFIED: Mark order as stock deducted and status = 'confirmed' ──
         transaction.update(orderRef, {
-          'status': 'delivered',
+          'status': 'confirmed',
           'stockDeducted': true,
-          'deliveredAt': FieldValue.serverTimestamp(),
+          'confirmedAt': FieldValue.serverTimestamp(),
           'updatedAt': FieldValue.serverTimestamp(),
         });
       });
@@ -140,7 +141,7 @@ class _ShopkeeperOrdersScreenState extends State<ShopkeeperOrdersScreen>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text('Order delivered and stock updated successfully!'),
+            content: const Text('Order confirmed and stock updated successfully!'),
             backgroundColor: Colors.green.shade600,
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -165,34 +166,60 @@ class _ShopkeeperOrdersScreenState extends State<ShopkeeperOrdersScreen>
     }
   }
 
-  // ── Mark as Delivered with Stock Deduction ──
-  Future<void> _markOrderDelivered(String orderId, List<dynamic> items) async {
-    // Show loading
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const Center(
-        child: CircularProgressIndicator(color: accentOrange),
-      ),
-    );
-    
+  // ── NEW: Mark as Delivered (NO stock deduction) ──
+  Future<void> _markOrderDelivered(String orderId) async {
     try {
-      await _deductStockForOrder(orderId, items);
+      final orderRef = FirebaseFirestore.instance.collection('orders').doc(orderId);
       
-      // Close loading dialog
-      if (mounted) Navigator.pop(context);
+      // Check if order exists and is confirmed
+      final orderDoc = await orderRef.get();
+      if (!orderDoc.exists) {
+        throw Exception('Order not found');
+      }
       
+      final orderData = orderDoc.data() as Map<String, dynamic>;
+      if (orderData['status'] != 'confirmed') {
+        throw Exception('Only confirmed orders can be marked as delivered');
+      }
+      
+      // ONLY update status to delivered - NO stock changes
+      await orderRef.update({
+        'status': 'delivered',
+        'deliveredAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Order marked as delivered successfully!'),
+            backgroundColor: Colors.green.shade600,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            margin: const EdgeInsets.all(16),
+          ),
+        );
+      }
     } catch (e) {
-      // Close loading dialog
-      if (mounted) Navigator.pop(context);
-      // Error already shown in _deductStockForOrder
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.toString()),
+            backgroundColor: Colors.red.shade600,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            margin: const EdgeInsets.all(16),
+          ),
+        );
+      }
+      rethrow;
     }
   }
 
-  // ── Simple status update (no stock deduction) ──
+  // ── Simple status update (with routing to appropriate method) ──
   Future<void> _updateOrderStatus(String orderId, String newStatus) async {
-    // If marking as delivered, use the stock deduction method
-    if (newStatus.toLowerCase() == 'delivered') {
+    // ── MODIFIED: If confirming, use stock deduction ──
+    if (newStatus.toLowerCase() == 'confirmed') {
       // Get order items first
       final orderDoc = await FirebaseFirestore.instance
           .collection('orders')
@@ -214,12 +241,12 @@ class _ShopkeeperOrdersScreenState extends State<ShopkeeperOrdersScreen>
       final orderData = orderDoc.data() as Map<String, dynamic>;
       final items = List.from(orderData['items'] ?? []);
       
-      // Check if already delivered
-      if (orderData['status'] == 'delivered') {
+      // Check if already confirmed or stock deducted
+      if (orderData['status'] == 'confirmed') {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Order already delivered'),
+              content: Text('Order already confirmed'),
               backgroundColor: Colors.orange,
             ),
           );
@@ -240,11 +267,36 @@ class _ShopkeeperOrdersScreenState extends State<ShopkeeperOrdersScreen>
         return;
       }
       
-      await _markOrderDelivered(orderId, items);
+      // Show loading
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const Center(
+          child: CircularProgressIndicator(color: accentOrange),
+        ),
+      );
+      
+      try {
+        await _deductStockForOrder(orderId, items);
+        
+        // Close loading dialog
+        if (mounted) Navigator.pop(context);
+        
+      } catch (e) {
+        // Close loading dialog
+        if (mounted) Navigator.pop(context);
+        // Error already shown in _deductStockForOrder
+      }
       return;
     }
     
-    // For other status changes (cancel, confirm) - no stock deduction
+    // ── MODIFIED: If marking as delivered, use simple status update ──
+    if (newStatus.toLowerCase() == 'delivered') {
+      await _markOrderDelivered(orderId);
+      return;
+    }
+    
+    // For other status changes (cancel) - no stock deduction
     final Map<String, dynamic> updateData = {
       'status': newStatus,
       'updatedAt': FieldValue.serverTimestamp(),
@@ -360,6 +412,8 @@ class _ShopkeeperOrdersScreenState extends State<ShopkeeperOrdersScreen>
             
             // ── Check if stock was deducted ──
             final bool stockDeducted = data['stockDeducted'] == true;
+            // ── Check if order is confirmed (for showing badge on confirmed tab) ──
+            final bool isConfirmed = status == 'confirmed' && stockDeducted;
 
             return GestureDetector(
               onTap: () => _openOrderDetails(data, orderId),
@@ -404,8 +458,9 @@ class _ShopkeeperOrdersScreenState extends State<ShopkeeperOrdersScreen>
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                          // ── Stock deducted badge ──
-                          if (status.toLowerCase() == 'delivered' && stockDeducted)
+                          // ── MODIFIED: Show stock badge for confirmed OR delivered with stockDeducted ──
+                          if ((status == 'confirmed' && stockDeducted) || 
+                              (status == 'delivered' && stockDeducted))
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                               decoration: BoxDecoration(
@@ -498,6 +553,7 @@ class _ShopkeeperOrdersScreenState extends State<ShopkeeperOrdersScreen>
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                                   padding: const EdgeInsets.symmetric(vertical: 8),
                                 ),
+                                // ── MODIFIED: Confirm button now deducts stock ──
                                 onPressed: () => _updateOrderStatus(orderId, 'confirmed'),
                                 child: const Text('Confirm', style: TextStyle(color: Colors.white, fontSize: 13)),
                               ),
@@ -644,8 +700,9 @@ class OrderDetailScreen extends StatelessWidget {
                   const Expanded(
                     child: Text('Order Details', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: primaryNavy)),
                   ),
-                  // ── Stock deducted status ──
-                  if (status.toLowerCase() == 'delivered' && stockDeducted)
+                  // ── MODIFIED: Stock badge for confirmed OR delivered ──
+                  if ((status == 'confirmed' && stockDeducted) || 
+                      (status == 'delivered' && stockDeducted))
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
@@ -791,7 +848,7 @@ class OrderDetailScreen extends StatelessWidget {
             ]),
             const SizedBox(height: 20),
 
-            // Action buttons
+            // ── MODIFIED: Action buttons ──
             if (status == 'pending') ...[
               Row(
                 children: [
@@ -821,6 +878,7 @@ class OrderDetailScreen extends StatelessWidget {
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
+                      // ── MODIFIED: Confirm now deducts stock ──
                       onPressed: () async {
                         await onStatusUpdate(orderId, 'confirmed');
                         if (context.mounted) Navigator.pop(context);
@@ -830,7 +888,7 @@ class OrderDetailScreen extends StatelessWidget {
                 ],
               ),
             ] else if (status == 'confirmed') ...[
-              // Mark as Delivered with stock deduction
+              // ── MODIFIED: Mark as Delivered now ONLY changes status ──
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
